@@ -23,6 +23,12 @@ FORBIDDEN_ROOTS = {"output", "dist", "build", "calendar_runs", ".venv", "venv", 
 
 
 def check() -> int:
+    runtime_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    pyside_pin = re.search(r"(?m)^PySide6==([^\s#]+)\s*$", runtime_requirements)
+    qt_notices = json.loads((ROOT / "third_party/qt/SOURCE.json").read_text(encoding="utf-8"))
+    if pyside_pin is None or pyside_pin.group(1) != qt_notices["version"]:
+        raise ValueError("PySide6 version and Qt license-source version differ; review and update the upstream notices before merging.")
+
     resources = json.loads((ROOT / "third_party/manifest.json").read_text(encoding="utf-8"))["files"]
     for relative, record in resources.items():
         actual = hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()

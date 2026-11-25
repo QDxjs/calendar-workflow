@@ -53,6 +53,7 @@ git push origin v0.5.5
 - `requirements.txt` 固定桌面依赖；`requirements-build.txt` 固定打包依赖。
 - Python 小版本升级也要重新构建并检查便携包；构建记录放在包内 `Documentation/BUILD_DEPENDENCIES.json`。
 - 更新 Qt/PySide 时同步 `third_party/qt/` 的版本许可文本及来源说明。
+- CI 会核对 PySide6 固定版本与 Qt 许可来源版本；Dependabot 的版本升级需要完成许可同步后才能通过这项检查。
 - 更新语料或 resvg 时先核对官方来源和许可，再更新 `third_party/manifest.json`。不能为了让检查通过而直接换哈希。
 - 源码保持 MIT；第三方语料及工具保留自己的许可，新增素材必须有明确的使用权。
 
