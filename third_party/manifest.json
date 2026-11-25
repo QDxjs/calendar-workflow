@@ -1,0 +1,24 @@
+{
+  "files": {
+    "tools/resvg/resvg.exe": {
+      "sha256": "905cbc0b9af8a0275e832c5b7608d05f75b69abc176b232975552004d8c48a1f",
+      "source": "https://github.com/linebender/resvg/releases/tag/v0.50.0"
+    },
+    "data/hitokoto/b.json": {
+      "sha256": "ab18c480ae7a7c93676b2c60267e5b4f95348e379e8c8986b79e2e95eb2f56b9",
+      "source": "https://github.com/hitokoto-osc/sentences-bundle/blob/1ecfe5ac1550ac928396c80153efa3d342198b02/sentences/b.json"
+    },
+    "data/hitokoto/d.json": {
+      "sha256": "fc3e992662b8e36cd7d0c5b7bbf80c81a94bb52f821131634f076d29b588070d",
+      "source": "https://github.com/hitokoto-osc/sentences-bundle/blob/1ecfe5ac1550ac928396c80153efa3d342198b02/sentences/d.json"
+    },
+    "data/hitokoto/h.json": {
+      "sha256": "8939953245144948c305ada34e8bfe96725414148865d98e931d1566167319f2",
+      "source": "https://github.com/hitokoto-osc/sentences-bundle/blob/1ecfe5ac1550ac928396c80153efa3d342198b02/sentences/h.json"
+    },
+    "data/hitokoto/k.json": {
+      "sha256": "50c3823d06ddcd015ec9d0cf56b211d139e9494d5881c7f471da894c0f71184a",
+      "source": "https://github.com/hitokoto-osc/sentences-bundle/blob/1ecfe5ac1550ac928396c80153efa3d342198b02/sentences/k.json"
+    }
+  }
+}

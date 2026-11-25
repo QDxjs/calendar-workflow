@@ -1,0 +1,45 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Generated calendars, previews, and user data
+/output/
+/calendar_runs/
+
+# Build and release artifacts (publish these through GitHub Releases)
+/build/
+/dist/
+*.spec
+*.zip
+*.sha256
+
+# Historical corpus with unclear redistribution rights; not used by current code
+/data/chinese-gushiwen-sentences.json
+
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

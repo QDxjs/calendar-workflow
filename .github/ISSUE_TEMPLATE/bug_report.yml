@@ -1,0 +1,24 @@
+name: 问题反馈
+description: 报告无法启动、生成失败或结果异常
+title: '[Bug] '
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本与 Windows 版本
+      placeholder: 例如 0.5.4 / Windows 11 x64
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤、预期结果和实际结果
+      description: 请提供最短复现步骤；语料和截图请先去除私人信息。
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: 错误信息或截图
+      description: 请勿粘贴口令、令牌、私人语料或个人文件路径。

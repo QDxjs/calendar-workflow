@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+*.csv text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.exe binary
+*.png binary
+*.jpg binary
+# Preserve upstream license bytes and their original whitespace.
+third_party/qt/*.txt -text whitespace=-blank-at-eol,-blank-at-eof
