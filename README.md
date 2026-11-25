@@ -6,6 +6,31 @@
 
 离线生成每日文学日历的 Windows 桌面工具。选择单日、日期范围、周、月或年，使用九种版式导出 **1122 × 1402** 的 PNG、可编辑 SVG、离线网页预览和可恢复的批次清单。当前版本：**0.5.4**。
 
+## 软件界面与生成效果
+
+### 桌面界面
+
+在一个窗口内选择日期范围、页面版式、语录来源和保存位置，再点击“生成日历”。下图为 0.5.4 的实际桌面组件，使用演示日期与通用保存目录。
+
+![每日文学日历桌面界面：左侧设置日期、版式与语录，右侧查看批次摘要并生成或恢复日历](docs/images/desktop.png)
+
+### 生成结果
+
+以下是软件实际导出的 **A · 网格、C · 留白、D · 双色圆形**，使用同一天和同一段古诗，方便比较版式。PNG 原图为 1122 × 1402，同时可导出 SVG。
+
+![实际生成的三种日历效果，从左到右为 A 网格、C 留白、D 双色圆形](docs/images/calendar-examples.png)
+
+[查看单页原尺寸 PNG](docs/images/calendar-single.png) · [查看九种版式大图](docs/images/all-layouts.png)
+
+<details>
+<summary>展开查看 A–I 全部九种版式</summary>
+
+![A 至 I 九种日历版式，以 2027 年 1 月 1 日和左思诗句作对照](docs/images/all-layouts.png)
+
+</details>
+
+示例诗句为左思《咏史·郁郁涧底松》的“郁郁涧底松，离离山上苗。”；示例输入与图片来源见 [图片说明](docs/images/README.md)。
+
 ## 直接使用
 
 1. 在 [Releases](https://github.com/QDxjs/calendar-workflow/releases/latest) 下载 `CalendarWorkflow-版本号-windows-x64.zip`。

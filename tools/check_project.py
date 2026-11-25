@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import struct
 import subprocess
 import sys
 
@@ -53,6 +54,14 @@ def check() -> int:
         if path.suffix.lower() == ".exe":
             if relative != "tools/resvg/resvg.exe":
                 raise ValueError(f"Unexpected executable: {relative}")
+            continue
+        if path.parts[:2] == ("docs", "images") and path.suffix.lower() == ".png":
+            image = (ROOT / path).read_bytes()
+            if not image.startswith(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR") or len(image) < 33 or len(image) > 4 * 1024 * 1024:
+                raise ValueError(f"Invalid or oversized documentation PNG: {relative}")
+            width, height = struct.unpack_from(">II", image, 16)
+            if not (0 < width <= 4096 and 0 < height <= 4096) or not image.endswith(b"\x00\x00\x00\x00IEND\xaeB`\x82"):
+                raise ValueError(f"Invalid documentation PNG dimensions or end marker: {relative}")
             continue
         content = (ROOT / path).read_text(encoding="utf-8-sig")
         if any(pattern.search(content) for pattern in SECRET_PATTERNS):
