@@ -33,7 +33,7 @@ from svg_primitives import (
 )
 from svg_validation import validate_rendering as _validate_rendering
 
-APP_VERSION = "0.5.4"
+APP_VERSION = "0.5.7"
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_ROOT = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
             else Path(__file__).resolve().parent)

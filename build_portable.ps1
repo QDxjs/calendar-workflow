@@ -82,12 +82,14 @@ $arguments = @(
     "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
     "--name", "CalendarWorkflow",
     "--windowed",
+    "--icon", (Join-Path $PSScriptRoot "assets/calendar.ico"),
     "--hidden-import", "desktop",
     "--distpath", (Join-Path $buildRoot "dist"),
     "--workpath", (Join-Path $buildRoot "work"),
     "--specpath", (Join-Path $buildRoot "spec"),
     "--add-data", ((Join-Path $PSScriptRoot "tools/resvg/resvg.exe") + ";tools/resvg"),
-    "--add-data", ((Join-Path $PSScriptRoot "data/hitokoto") + ";data/hitokoto")
+    "--add-data", ((Join-Path $PSScriptRoot "data/hitokoto") + ";data/hitokoto"),
+    "--add-data", ((Join-Path $PSScriptRoot "assets/calendar.ico") + ";assets")
 )
 python @arguments launcher.py
 if ($LASTEXITCODE -ne 0) {
@@ -121,6 +123,7 @@ Copy-Item -LiteralPath "HITOKOTO_SOURCE.md" -Destination (Join-Path $hitokotoNot
 
 $requiredPackageFiles = @(
     "CalendarWorkflow.exe",
+    "_internal/assets/calendar.ico",
     "_internal/tools/resvg/resvg.exe",
     "README.md",
     "Documentation/USER_GUIDE.md",

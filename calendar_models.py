@@ -25,6 +25,14 @@ class CalendarPage:
         return WEEKDAYS[self.target_date.weekday()]
 
 
+@dataclass(frozen=True)
+class GenerationPlan:
+    """One immutable selection shared by the desktop sample and batch export."""
+
+    pages: tuple[CalendarPage, ...]
+    seed: int | None
+
+
 class BatchCancelled(Exception):
     """Signal that a caller cancelled generation before publishing output."""
 
@@ -50,9 +58,15 @@ class GenerationFailed:
     error: Exception
 
 
+@dataclass(frozen=True)
+class PreviewCompleted:
+    images: tuple[tuple[str, bytes], ...]
+
+
 GenerationEvent = Union[
     GenerationProgress,
     GenerationCompleted,
     GenerationCancelled,
     GenerationFailed,
+    PreviewCompleted,
 ]

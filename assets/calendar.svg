@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="violet" x1="24" y1="12" x2="224" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8065ef"/>
+      <stop offset="1" stop-color="#5138b2"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#violet)"/>
+  <rect x="40" y="57" width="176" height="163" rx="26" fill="#33236e" opacity=".23"/>
+  <rect x="40" y="49" width="176" height="163" rx="26" fill="#fff9ed"/>
+  <path d="M66 49h124a26 26 0 0 1 26 26v18H40V75a26 26 0 0 1 26-26Z" fill="#ded6ff"/>
+  <path d="M82 38v29M174 38v29" fill="none" stroke="#453080" stroke-width="16" stroke-linecap="round"/>
+  <path d="M82 34v25M174 34v25" fill="none" stroke="#fff9ed" stroke-width="12" stroke-linecap="round"/>
+  <path d="M64 119q34-15 64 5q30-20 64-5v64q-34-12-64 7q-30-19-64-7Z" fill="#eee8ff" stroke="#5c448e" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M128 125v62" fill="none" stroke="#5c448e" stroke-width="6" stroke-linecap="round"/>
+  <path d="M161 116v38l10-7l10 7v-38q-10-2-20 0Z" fill="#d99c41"/>
+  <path d="M79 141q16-3 32 5M79 159q16-3 32 5" fill="none" stroke="#9d8cbe" stroke-width="6" stroke-linecap="round"/>
+</svg>

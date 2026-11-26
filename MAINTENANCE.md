@@ -37,7 +37,7 @@ git push origin main
 只有想让用户下载一个新版本时才发布。普通文档修改不用打包。
 
 1. 修改 `generate.py` 的 `APP_VERSION`，例如从 `0.5.4` 改为 `0.5.5`。
-2. 在 `CHANGELOG.md` 顶部写新版本变化，同步 README 和使用手册中的当前版本。
+2. 在 `CHANGELOG.md` 顶部写新版本变化，同步 README、使用手册和 `.github/release-notes.md`。界面改动后可在 Windows 运行 `python tools/render_readme_images.py` 更新实际界面与导出图片，并核对 `docs/images/README.md` 的版本和说明。
 3. 按上节提交并推送，等待 Actions 的 CI 通过。
 4. 在当前提交创建并推送版本标签：
 

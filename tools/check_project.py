@@ -55,7 +55,19 @@ def check() -> int:
             if relative != "tools/resvg/resvg.exe":
                 raise ValueError(f"Unexpected executable: {relative}")
             continue
-        if path.parts[:2] == ("docs", "images") and path.suffix.lower() == ".png":
+        if relative == "assets/calendar.ico":
+            icon = (ROOT / path).read_bytes()
+            if len(icon) < 6 or struct.unpack_from("<HHH", icon) != (0, 1, 9):
+                raise ValueError("Invalid application ICO directory.")
+            for index, size in enumerate((16, 20, 24, 32, 40, 48, 64, 128, 256)):
+                width, height, _colors, reserved, planes, depth, length, offset = struct.unpack_from("<BBBBHHII", icon, 6 + index * 16)
+                image = icon[offset:offset + length]
+                if ((width or 256, height or 256) != (size, size) or reserved != 0 or planes != 1 or depth != 32
+                        or offset < 150 or len(image) != length or not image.startswith(b"\x89PNG\r\n\x1a\n")
+                        or len(image) < 24 or struct.unpack_from(">II", image, 16) != (size, size)):
+                    raise ValueError(f"Invalid application icon image: {size}.")
+            continue
+        if (path.parts[:2] == ("docs", "images") or relative == "assets/calendar.png") and path.suffix.lower() == ".png":
             image = (ROOT / path).read_bytes()
             if not image.startswith(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR") or len(image) < 33 or len(image) > 4 * 1024 * 1024:
                 raise ValueError(f"Invalid or oversized documentation PNG: {relative}")

@@ -188,6 +188,7 @@ def verify_portable(*, full_year: bool) -> int:
         print(f"Portable acceptance failed: {exc}", file=sys.stderr)
         return 1
     report_output_success(count)
+    print("Nine layout examples and first-page preview/export PNG consistency passed.", flush=True)
     print("Sample manifest replay, cancellation cleanup and retry passed.", flush=True)
     return 0
 

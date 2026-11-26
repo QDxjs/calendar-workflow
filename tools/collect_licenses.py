@@ -40,6 +40,8 @@ def collect(documentation: Path) -> None:
         installed = distribution(name)
         copied = []
         for relative in installed.files or []:
+            if "__pycache__" in relative.parts or relative.suffix.lower() in {".pyc", ".pyo"}:
+                continue
             if not any(word in part.lower() for part in relative.parts for word in ("license", "copying", "notice")):
                 continue
             source = Path(installed.locate_file(relative))
