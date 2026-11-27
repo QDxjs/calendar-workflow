@@ -36,7 +36,21 @@
 
 同目录提供 `CalendarWorkflow-0.6.2-windows-x64.zip.sha256`。最终包日志为 `output/validation-v0.6.2/package.log`、`full-year.log` 及对应 stderr 日志。
 
-本机日志、空白批次样例及截图保存在 `output/validation-v0.6.2/`，不纳入源码公开文件集合。本次不自动提交、推送、打标签或公开发布。
+本机开发期间的日志、空白批次样例及截图保存在 `output/validation-v0.6.2/`，不纳入公开源码或 Release 附件。公开发行与下载核验见下一节。
+
+## GitHub v0.6.2 发行验证
+
+已于 2026-11-27 发布 [v0.6.2](https://github.com/QDxjs/calendar-workflow/releases/tag/v0.6.2)，标签指向发布提交 `a6dead3650fd55b46d8f78981d2d217eba155d4b`。GitHub Actions 的 Windows Python 3.10 与 3.12 两个 CI 矩阵均通过，包括 82 项测试、源码桌面流程和离线 Chromium 网页交互。发行工作流在 Windows/Python 3.12 上完成 366 页全年便携验收后上传附件。
+
+从公开 Release 下载的 ZIP 为 `CalendarWorkflow-0.6.2-windows-x64.zip`，大小 **52,712,705 字节**，SHA-256：
+
+```text
+e8b7e5276dc0c73329ac99028b1f21dea2485fe532933960f3a4a2017aa18cf2
+```
+
+下载后独立核对 `.sha256` 一致；在新的解压目录运行 `CalendarWorkflow.exe --verify-package`，**304 项**清单文件全部通过；再运行 `CalendarWorkflow.exe --verify-portable --full-year`，366 页、九版式、首张预览一致性、历史、手写留白/仅出处及恢复、取消与重试均通过。进程只保留 Windows 系统 `PATH`，并移除 `PYTHONHOME` / `PYTHONPATH`；这不是干净无 Python 目标机验收。
+
+此前本机 47,842,674 字节归档的哈希是开发环境下的本地便携构建记录，不是公开 Release 附件。公开附件应以 GitHub 的 `.sha256` 和上方独立复核值为准。
 
 ## 环境边界
 
