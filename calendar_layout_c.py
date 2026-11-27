@@ -21,7 +21,7 @@ def render_c(m: dict[str, object]) -> str:
           text(561, 804, f'{m["day"]:02d}', 444, family=LATIN),
           text(62, 627, "MARGIN", 12, anchor="start", spacing=2.0, max_width=130),
           text(62, 655, "NOTE", 12, anchor="start", spacing=2.0, max_width=130),
-          text(62, 683, "NO. 001", 12, anchor="start", spacing=1.6, max_width=130),
+          text(62, 683, f'NO. {m["ordinal"]:03d}', 12, anchor="start", spacing=1.6, max_width=130),
           text(1060, 627, "YEAR DAY", 12, anchor="end", spacing=1.5, max_width=150),
           text(1060, 655, f'{m["ordinal"]} / {m["year_days"]}', 15,
                anchor="end", spacing=1.2, max_width=150),

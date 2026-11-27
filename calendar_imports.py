@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 import random
 import re
@@ -54,10 +55,30 @@ def prepare_replay(
     validate: Callable[[list[CalendarPage]], None],
 ) -> tuple[list[CalendarPage], int | None]:
     """Recover recorded content and actual layouts without consulting the quote library."""
+    details = prepare_replay_with_details(manifest_path, renderers=renderers, validate=validate)
+    return list(details.pages), details.seed
+
+
+@dataclass(frozen=True)
+class ReplayDetails:
+    pages: tuple[CalendarPage, ...]
+    seed: int | None
+    versions: tuple[str, ...]
+
+
+def prepare_replay_with_details(
+    manifest_path: Path, *, renderers: Mapping[str, object],
+    validate: Callable[[list[CalendarPage]], None],
+) -> ReplayDetails:
+    """Collect replay content and metadata from one CSV read."""
     rows = read_rows(manifest_path, extra_required=("quote_id",))
     pages: list[CalendarPage] = []
+    versions: set[str] = set()
     seed: int | None = None
     for record_number, row in enumerate(rows, start=2):
+        version = row.get("app_version", "").strip()
+        if version:
+            versions.add(version)
         target_date = parse_csv_date(row["date"].strip(), record_number)
         iso_year, iso_week, _ = target_date.isocalendar()
         expected_iso = {
@@ -91,4 +112,4 @@ def prepare_replay(
         pages.append(CalendarPage(target_date, selection, layout, row["quote"], row["source"], row["quote_id"]))
 
     validate(pages)
-    return pages, seed
+    return ReplayDetails(tuple(pages), seed, tuple(sorted(versions)))

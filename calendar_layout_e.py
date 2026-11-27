@@ -25,7 +25,7 @@ def render_e(m: dict[str, object]) -> str:
         line(166, 177, 166, 474, 1.0), line(956, 177, 956, 474, 1.0),
         text(105, 250, "READING", 11, family=SANS, spacing=1.2, max_width=112),
         text(105, 280, "FILE", 11, family=SANS, spacing=1.2, max_width=112),
-        text(105, 310, "NO. 001", 11, family=SANS, spacing=0.8, max_width=112),
+        text(105, 310, f'NO. {m["ordinal"]:03d}', 11, family=SANS, spacing=0.8, max_width=112),
         text(1017, 250, "SOURCE", 11, family=SANS, spacing=1.0, max_width=112),
         text(1017, 280, "BOOK", 11, family=SANS, spacing=1.2, max_width=112),
         text(1017, 310, "PAGE", 11, family=SANS, spacing=1.2, max_width=112),
@@ -63,6 +63,6 @@ def render_e(m: dict[str, object]) -> str:
           line(835, 1280, 900, 1280),
           text(1007, 1264, "FILED", 11, fill=PAPER, family=SANS, spacing=1.0),
           text(1007, 1290, "BY DATE", 11, fill=PAPER, family=SANS, spacing=0.8),
-          text(1007, 1316, "2027", 10, fill=PAPER, family=SANS, spacing=0.8),
+          text(1007, 1316, str(d.year), 10, fill=PAPER, family=SANS, spacing=0.8),
           "</svg>"]
     return "\n".join(p)

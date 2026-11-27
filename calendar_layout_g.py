@@ -40,7 +40,7 @@ def render_g(m: dict[str, object]) -> str:
           text(758, 668, f'{d.year}', 23, anchor="start", family=LATIN),
           rect(62, 744, 998, 444, "none", INK, 0.9),
           rect(62, 744, 122, 444, INK, "none", 0),
-          text(123, 820, "“", 74, family=LATIN, fill=PAPER),
+          *([text(123, 820, "“", 74, family=LATIN, fill=PAPER)] if str(m["quote"]).strip() else []),
           text(123, 898, "QUOTE", 9, family=SANS, fill=PAPER, spacing=0.8),
           text(210, 794, "TODAY'S LINE", 10, anchor="start", family=SANS, spacing=1.0),
           line(210, 812, 1038, 812, 0.8, MID)]

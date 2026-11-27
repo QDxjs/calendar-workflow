@@ -22,7 +22,7 @@ def render_a(m: dict[str, object]) -> str:
     p += [rect(48, 48, 218, 171), rect(274, 48, 574, 171), rect(856, 48, 218, 171),
           text(157, 94, "READING", 14, spacing=2.0),
           text(157, 121, "INDEX", 14, spacing=2.0),
-          text(157, 158, "ENTRY 001", 12, spacing=1.4),
+          text(157, 158, f'ENTRY {m["ordinal"]:03d}', 12, spacing=1.4),
           line(132, 188, 182, 188, 1.4, CLAY),
           text(561, 108, m["weekday"], 42, family=SANS, weight="bold"),
           line(274, 135, 848, 135),
@@ -46,7 +46,7 @@ def render_a(m: dict[str, object]) -> str:
           text(561, 594, m["month"], 58, family=LATIN, spacing=3),
           line(253, 628, 869, 628),
           line(278, 660, 342, 660, 1.2, CLAY),
-          text(561, 668, "ENTRY / 001", 13, spacing=1.7, max_width=580),
+          text(561, 668, f'ENTRY / {m["ordinal"]:03d}', 13, spacing=1.7, max_width=580),
           line(780, 660, 844, 660, 1.2, CLAY),
           rect(48, 716, 1026, 520), rect(48, 716, 72, 520), rect(1002, 716, 72, 520),
           line(120, 766, 1002, 766),
@@ -61,11 +61,11 @@ def render_a(m: dict[str, object]) -> str:
                          width=790, max_height=300, font_size=42, max_lines=5,
                          rule_color=CLAY))
     p += [rect(48, 1257, 1026, 96), rect(48, 1257, 160, 96), rect(934, 1257, 140, 96),
-          text(128, 1294, "DAY / 001", 11.5, spacing=0.6, max_width=140),
+          text(128, 1294, f'DAY / {m["ordinal"]:03d}', 11.5, spacing=0.6, max_width=140),
           text(128, 1321, "READING FILE", 11.5, spacing=0.5, max_width=140),
           line(242, 1305, 330, 1305), text(591, 1314, BRAND, 16, family=LATIN,
           italic=True, spacing=0.5, max_width=500),
-          line(852, 1305, 914, 1305), text(1004, 1297, "NO. 001", 11.5, spacing=0.3,
+          line(852, 1305, 914, 1305), text(1004, 1297, f'NO. {m["ordinal"]:03d}', 11.5, spacing=0.3,
           max_width=126), text(1004, 1321, "DAILY INDEX", 11.5, spacing=0.3,
           max_width=126), "</svg>"]
     return "\n".join(p)

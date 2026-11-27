@@ -156,6 +156,13 @@ def quote_block(value: str, source: str, *, x: float, y: float, width: float,
                 line_gap: float = 1.38, max_lines: int | None = None,
                 align: str = "middle", source_color: str = INK,
                 rule_color: str = MID) -> str:
+    if not value.strip():
+        if not source:
+            return ""
+        return label_block(source, x=x, y=y, width=width * 0.9,
+                           font_size=max(20, font_size * 0.54),
+                           anchor={"start": "start", "end": "end"}.get(align, "middle"),
+                           color=source_color)
     max_em = width / (font_size * 1.08)
     lines = balance_quote_lines(wrap_text(value, max_em), max_em)
     while len(lines) * font_size * line_gap > max_height and font_size > 24:

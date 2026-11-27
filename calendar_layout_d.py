@@ -24,7 +24,7 @@ def render_d(m: dict[str, object]) -> str:
              spacing=1.6, max_width=140),
         text(970, 101, str(d.year), 12, anchor="start", family=SANS,
              spacing=1.7, max_width=140),
-        text(970, 128, "READING / 01", 11, anchor="start", family=SANS,
+        text(970, 128, f'READING / {m["ordinal"]:03d}', 11, anchor="start", family=SANS,
              spacing=1.1, max_width=140),
         line(970, 151, 1006, 151, 1.1, CLAY),
         text(970, 188, "DATE", 11.5, anchor="start", family=SANS,
@@ -50,7 +50,7 @@ def render_d(m: dict[str, object]) -> str:
              spacing=0.6, max_width=130),
         line(54, 837, 1068, 837, 1.1),
         rect(55, 860, 1012, 350, PALE, PALE, 0),
-        text(560, 907, "READING / 001", 11.5, family=SANS,
+        text(560, 907, f'READING / {m["ordinal"]:03d}', 11.5, family=SANS,
              spacing=1.7, max_width=500),
     ]
     p.append(quote_block(str(m["quote"]), str(m["source"]), x=560, y=1054,

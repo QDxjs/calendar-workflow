@@ -15,13 +15,30 @@ def preferences_path() -> Path:
     return local_data / "CalendarWorkflow" / "settings.json"
 
 
-def load_output_directory(default: Path) -> Path:
+def _read_settings() -> tuple[dict, str]:
     try:
         stored = json.loads(preferences_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default
+    except FileNotFoundError:
+        return {}, ""
+    except (OSError, ValueError) as exc:
+        return {}, f"无法读取偏好设置，已使用默认目录；可重新选择保存位置。详情：{exc}"
     if not isinstance(stored, dict):
-        return default
+        return {}, "偏好设置格式无效，已使用默认目录；可重新选择保存位置。"
+    return stored, ""
+
+
+def preferences_warning() -> str:
+    stored, warning = _read_settings()
+    if warning or "output_directory" not in stored:
+        return warning
+    path = stored["output_directory"]
+    if not isinstance(path, str) or not path.strip() or "\0" in path or not Path(path).is_absolute():
+        return "保存位置设置无效，已使用默认目录；可重新选择保存位置。"
+    return ""
+
+
+def load_output_directory(default: Path) -> Path:
+    stored, _warning = _read_settings()
     path = stored.get("output_directory")
     if not isinstance(path, str) or not path.strip() or "\0" in path:
         return default
@@ -29,12 +46,18 @@ def load_output_directory(default: Path) -> Path:
     return candidate if candidate.is_absolute() else default
 
 
-def save_output_directory(directory: Path) -> None:
-    if not directory.is_absolute():
+def save_output_directory(directory: Path | None) -> None:
+    """Persist an explicit directory, or clear it to follow the running app."""
+    if directory is not None and not directory.is_absolute():
         raise ValueError("输出目录必须是绝对路径。")
     target = preferences_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    contents = json.dumps({"output_directory": str(directory)}, ensure_ascii=False, indent=2) + "\n"
+    stored, _warning = _read_settings()
+    if directory is None:
+        stored.pop("output_directory", None)
+    else:
+        stored["output_directory"] = str(directory)
+    contents = json.dumps(stored, ensure_ascii=False, indent=2) + "\n"
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(

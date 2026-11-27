@@ -43,11 +43,14 @@ from calendar_models import (
     PreviewCompleted,
 )
 from calendar_preview import run_preview_job
+from content_sources import ManualQuoteError, plan_manual_page, validate_manual_source
+from manual_quote_panel import ManualQuotePanel
 from generate import LAYOUT_LABELS, RESOURCE_ROOT, prepare_replay
 from generation_service import PagePreparation, run_generation_job
 from launcher import OUTPUT_ROOT, plan_pages, unique_output_dir
 from periods import dates_between, dates_in_iso_week, dates_in_month, dates_in_year
-from preferences import load_output_directory, save_output_directory
+from preferences import load_output_directory, preferences_warning, save_output_directory
+from history_dialog import HistoryDialog
 from preview_dialogs import FirstPageDialog, LayoutChooserDialog
 from quote_library import QUOTE_DIRECTORY, builtin_quotes, inspect_quotes
 from quote_import_dialog import QuotePreviewDialog
@@ -72,7 +75,7 @@ QLineEdit, QComboBox {
 }
 QLineEdit:focus, QComboBox:focus { border: 1px solid #8069eb; background: white; }
 QLineEdit:disabled, QComboBox:disabled { color: #82889a; background: #f4f5f8; }
-QLineEdit[invalid="true"] { border-color: #bd3a4a; }
+QLineEdit[invalid="true"], QPlainTextEdit[invalid="true"] { border-color: #bd3a4a; }
 QComboBox::drop-down { border: none; width: 26px; }
 QComboBox QAbstractItemView { background: white; border: 1px solid #dfe3ec; selection-background-color: #eeeaff; }
 QPushButton {
@@ -173,10 +176,13 @@ def generation_error_message(error: Exception) -> str:
 
 
 class CalendarWindow(QMainWindow):
-    def __init__(self, *, smoke_output: Path | None = None, smoke_year: bool = False) -> None:
+    def __init__(self, *, smoke_output: Path | None = None, smoke_year: bool = False,
+                 smoke_manual: bool = False, smoke_quote: str | None = None) -> None:
         super().__init__()
         self.smoke_output = smoke_output
         self.smoke_year = smoke_year
+        self.smoke_manual = smoke_manual
+        self.smoke_quote = smoke_quote
         self.exit_code = 0
         self.running = False
         self.closing = False
@@ -194,10 +200,12 @@ class CalendarWindow(QMainWindow):
         self._current_period = "单日"
         self._period_values: dict[str, tuple[str, str]] = {}
         self._custom_quotes = False
+        self._manual_fit_failure: tuple | None = None
         self._settings_valid = False
         self._output_error = ""
         packaged = getattr(sys, "frozen", False)
-        self.output_root = Path(OUTPUT_ROOT) if packaged else load_output_directory(OUTPUT_ROOT)
+        self.output_root = load_output_directory(OUTPUT_ROOT)
+        self._preferences_warning = preferences_warning() if smoke_output is None else ""
         if smoke_output is not None:
             self.output_root = smoke_output
         if packaged and smoke_output is None:
@@ -249,9 +257,14 @@ class CalendarWindow(QMainWindow):
         header.setSpacing(16)
         title_block = QVBoxLayout()
         title_block.setSpacing(4)
-        title_block.addWidget(_label("每日文学日历", "pageTitle"))
-        title_block.addWidget(_label("挑选日期与版式，把喜欢的文字变成可以收藏的日历。", "pageSubtitle"))
+        for text, name in (("每日文学日历", "pageTitle"), ("挑选日期与版式，把喜欢的文字变成可以收藏的日历。", "pageSubtitle")):
+            label = _label(text, name)
+            label.setWordWrap(True)
+            title_block.addWidget(label)
         header.addLayout(title_block, 1)
+        self.history_button = QPushButton("历史批次")
+        self.history_button.clicked.connect(self._show_history)
+        header.addWidget(self.history_button)
         open_folder = QPushButton("打开日历文件夹")
         open_folder.clicked.connect(self._open_output)
         header.addWidget(open_folder)
@@ -340,28 +353,14 @@ class CalendarWindow(QMainWindow):
         self.seed_error = _error_label()
         layout.addWidget(self.seed_error)
 
-        quote_panel = QFrame()
-        quote_panel.setObjectName("quotePanel")
-        quote_layout = QVBoxLayout(quote_panel)
-        quote_layout.setContentsMargins(14, 12, 14, 12)
-        quote_layout.setSpacing(8)
-        quote_header = QHBoxLayout()
-        self.corpus_label = _label(self._builtin_label(), "quoteTitle")
-        quote_header.addWidget(self.corpus_label)
-        quote_header.addStretch(1)
-        quote_layout.addLayout(quote_header)
-        quote_buttons = QHBoxLayout()
-        self.import_button = QPushButton("导入语录")
+        self.content_panel = ManualQuotePanel(self._builtin_label())
+        self.corpus_label = self.content_panel.corpus_label
+        self.import_button = self.content_panel.import_button
         self.import_button.clicked.connect(self._import_quotes)
-        self.reset_button = QPushButton("恢复内置")
-        self.reset_button.setObjectName("quietButton")
-        self.reset_button.setEnabled(False)
+        self.reset_button = self.content_panel.reset_button
         self.reset_button.clicked.connect(self._reset_quotes)
-        quote_buttons.addWidget(self.import_button)
-        quote_buttons.addWidget(self.reset_button)
-        quote_buttons.addStretch(1)
-        quote_layout.addLayout(quote_buttons)
-        layout.addWidget(quote_panel)
+        self.content_panel.changed.connect(self._refresh_summary)
+        layout.addWidget(self.content_panel)
 
         output = QHBoxLayout()
         output.setSpacing(9)
@@ -377,6 +376,13 @@ class CalendarWindow(QMainWindow):
         layout.addLayout(output)
         self.output_error = _error_label()
         layout.addWidget(self.output_error)
+        self.default_folder_button = QPushButton("恢复默认目录")
+        self.default_folder_button.setObjectName("quietButton")
+        self.default_folder_button.clicked.connect(self._reset_output_directory)
+        layout.addWidget(self.default_folder_button)
+        self.settings_warning = _error_label()
+        self._show_error(self.settings_warning, self._preferences_warning)
+        layout.addWidget(self.settings_warning)
         return card
 
     def _summary_card(self) -> QWidget:
@@ -401,6 +407,7 @@ class CalendarWindow(QMainWindow):
         self.summary_layout.setWordWrap(True)
         summary_layout.addWidget(self.summary_layout)
         self.summary_quotes = _label(f"可用语录：{len(self.quotes)} 条", "muted")
+        self.summary_quotes.setWordWrap(True)
         summary_layout.addWidget(self.summary_quotes)
         layout.addWidget(summary)
 
@@ -492,6 +499,7 @@ class CalendarWindow(QMainWindow):
         with QSignalBlocker(self.start), QSignalBlocker(self.end):
             self.start.setText(first_value)
             self.end.setText(last_value)
+        self.content_panel.set_single_day(period == "单日")
 
     @staticmethod
     def _date(value: str, field: str = "start") -> date:
@@ -534,6 +542,8 @@ class CalendarWindow(QMainWindow):
             raise SettingsError("seed", "随机种子请填写整数，例如 31415；也可以留空。") from exc
 
     def _check_capacity(self, count: int) -> None:
+        if self.content_panel.is_manual:
+            return
         if count > len(self.quotes):
             raise SettingsError("quotes", f"本次需要 {count} 条不重复语录，当前只有 {len(self.quotes)} 条。请缩短范围或导入更多语录。")
 
@@ -577,9 +587,10 @@ class CalendarWindow(QMainWindow):
 
     def _sync_controls(self) -> None:
         editable = not self.running
-        for widget in (self.period, self.start, self.end, self.layout_choice, self.seed, self.import_button, self.browse_button, self.layouts_button):
+        for widget in (self.period, self.start, self.end, self.layout_choice, self.seed, self.import_button, self.browse_button, self.layouts_button, self.history_button, self.default_folder_button):
             widget.setEnabled(editable)
         self.reset_button.setEnabled(editable and self._custom_quotes)
+        self.content_panel.set_state(busy=self.running, custom=self._custom_quotes)
         self.generate_button.setEnabled(editable and self._settings_valid and not self._output_error)
         self.sample_button.setEnabled(editable and self._settings_valid)
         self.replay_button.setEnabled(editable and not self._output_error)
@@ -591,7 +602,15 @@ class CalendarWindow(QMainWindow):
             return
         if update_summary:
             self.summary_layout.setText(self.layout_choice.currentText())
-            self.summary_quotes.setText(f"可用语录：{len(self.quotes)} 条")
+            if self.content_panel.is_manual:
+                content = self.content_panel.content()
+                attribution = "含出处" if content.source.strip() else "无出处"
+                detail = f"{len(content.quote.strip())} 字 · {attribution}"
+                if not content.quote.strip():
+                    detail = "仅出处" if content.source.strip() else "留白日历"
+                self.summary_quotes.setText(f"内容来源：单日手写（{detail}）")
+            else:
+                self.summary_quotes.setText(f"可用语录：{len(self.quotes)} 条")
         date_error = seed_error = ""
         invalid_field = ""
         try:
@@ -617,7 +636,19 @@ class CalendarWindow(QMainWindow):
         self._mark_invalid(self.end, invalid_field == "end")
         self._mark_invalid(self.seed, bool(seed_error))
         self._mark_invalid(self.output_path, bool(self._output_error))
-        self._settings_valid = not date_error and not seed_error
+        manual_error = None
+        if self.content_panel.is_manual:
+            try:
+                validate_manual_source(self.content_panel.content())
+                if not date_error and not seed_error and self._manual_fit_failure is not None:
+                    failed_key, failed_error = self._manual_fit_failure
+                    if failed_key == self._content_key():
+                        raise failed_error
+                    self._manual_fit_failure = None
+            except ManualQuoteError as exc:
+                manual_error = exc
+        self.content_panel.show_error(manual_error.field if manual_error else "", str(manual_error or ""))
+        self._settings_valid = not date_error and not seed_error and manual_error is None
         self._discard_changed_plan()
         self._sync_controls()
         if update_summary:
@@ -692,19 +723,39 @@ class CalendarWindow(QMainWindow):
         selected = QFileDialog.getExistingDirectory(self, "选择日历保存位置", str(self.output_root))
         if not selected:
             return
-        self.output_root = Path(selected)
+        self._set_output_directory(Path(selected))
+
+    def _reset_output_directory(self) -> None:
+        if not self.running:
+            self._set_output_directory(Path(OUTPUT_ROOT), reset=True)
+
+    def _set_output_directory(self, directory: Path, *, reset: bool = False) -> None:
+        self.output_root = directory
         self.output_path.setText(str(self.output_root))
         self.output_path.setToolTip(str(self.output_root))
-        if not self._check_output():
+        writable = self._check_output()
+        if not writable and not reset:
             return
-        if not getattr(sys, "frozen", False) and self.smoke_output is None:
+        if self.smoke_output is None:
             try:
-                save_output_directory(self.output_root)
-                self._set_status("保存位置已记住；下次启动仍会使用此目录。")
+                save_output_directory(None if reset else self.output_root)
+                self._show_error(self.settings_warning, "")
+                if writable:
+                    self._set_status("已恢复默认目录；下次启动使用默认位置。" if reset else "保存位置已记住；下次启动仍会使用此目录。")
             except (OSError, ValueError) as exc:
                 self._set_status(f"本次使用所选目录；无法保存偏好设置：{exc}", error=True)
         else:
             self._set_status("已更改本次保存位置。")
+
+    def _show_history(self) -> None:
+        if self.running:
+            return
+        dialog = HistoryDialog(self.output_root, self)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted and dialog.replay_path is not None:
+                self._replay_manifest(dialog.replay_path)
+        finally:
+            dialog.deleteLater()
 
     def _open_output(self) -> None:
         path = self.output_root
@@ -738,10 +789,14 @@ class CalendarWindow(QMainWindow):
         )
         if not selected:
             return
+        self._replay_manifest(Path(selected))
+
+    def _replay_manifest(self, manifest: Path) -> None:
+        if self.running:
+            return
         if not self._check_output():
             return
         output_dir = unique_output_dir("replay", None, root=self.output_root)
-        manifest = Path(selected)
         self._job_plan = None
         self.summary_period.setText(f"从清单恢复 · {manifest.name}")
         self.summary_pages.setText("正在读取清单…")
@@ -751,8 +806,12 @@ class CalendarWindow(QMainWindow):
 
     def _content_key(self) -> tuple:
         days, _period_key, _label_text = self._selection()
+        if self.content_panel.is_manual:
+            content = self.content_panel.content()
+            return ("manual", days[0], self.layout_choice.currentData(), self._seed_value(),
+                    content.quote.strip(), content.source.strip())
         return (
-            self.period.currentText(), tuple(days), self.layout_choice.currentData(), self._seed_value(),
+            "corpus", self.period.currentText(), tuple(days), self.layout_choice.currentData(), self._seed_value(),
             tuple((item["quote"], item["source"], item["quote_id"]) for item in self.quotes),
         )
 
@@ -781,7 +840,16 @@ class CalendarWindow(QMainWindow):
             seed = self._seed_value()
             choice = self.layout_choice.currentData()
             layout = "RANDOM" if choice == "随机" else str(choice)
-            self._prepared_plan = GenerationPlan(tuple(plan_pages(days, self.quotes, layout, seed)), seed)
+            if self.content_panel.is_manual:
+                try:
+                    plan = plan_manual_page(days[0], self.content_panel.content(), layout, seed)
+                except ManualQuoteError as exc:
+                    self._manual_fit_failure = (key, exc)
+                    self._refresh_summary()
+                    raise
+            else:
+                plan = GenerationPlan(tuple(plan_pages(days, self.quotes, layout, seed)), seed)
+            self._prepared_plan = plan
             self._plan_key = key
             self._sample_image = None
         return self._prepared_plan
@@ -832,6 +900,10 @@ class CalendarWindow(QMainWindow):
                 return
             self._sample_plan = plan
             self._start_preview_job("sample", plan.pages[:1])
+        except ManualQuoteError as exc:
+            self._set_status(str(exc), error=True)
+            if self.smoke_output is not None:
+                self._finish_smoke(exc)
         except (OSError, ValueError) as exc:
             QMessageBox.warning(self, "无法预览首张", str(exc))
 
@@ -872,6 +944,11 @@ class CalendarWindow(QMainWindow):
             layout = "RANDOM" if layout_data == "随机" else str(layout_data)
             plan = self._plan_for_settings()
             output_dir = unique_output_dir(period_key, layout, root=self.output_root)
+        except ManualQuoteError as exc:
+            self._set_status(str(exc), error=True)
+            if self.smoke_output is not None:
+                self._finish_smoke(exc)
+            return
         except (ValueError, OSError) as exc:
             if self.smoke_output is not None:
                 self._finish_smoke(exc)
@@ -998,6 +1075,11 @@ class CalendarWindow(QMainWindow):
         self.start.setText("2028" if self.smoke_year else "20270101")
         self.layout_choice.setCurrentIndex(0 if self.smoke_year else 1)
         self.seed.setText("31415")
+        if self.smoke_manual:
+            quote = self.smoke_quote if self.smoke_quote is not None else '春风又绿江南岸\n明月 <日常> & "文字"'
+            self.content_panel.quote_edit.setPlainText(quote)
+            self.content_panel.selector.setCurrentIndex(1)
+            self.layout_choice.setCurrentIndex(0)
         self.output_root = self.smoke_output or self.output_root
         self._start_preview_job("layouts", self._layout_example_pages())
 
@@ -1023,7 +1105,8 @@ class CalendarWindow(QMainWindow):
         event.accept()
 
 
-def run(*, smoke_output: Path | None = None, smoke_year: bool = False) -> int:
+def run(*, smoke_output: Path | None = None, smoke_year: bool = False,
+        smoke_manual: bool = False, smoke_quote: str | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("每日文学日历")
     app.setWindowIcon(QIcon(str(RESOURCE_ROOT / "assets/calendar.ico")))
@@ -1033,7 +1116,8 @@ def run(*, smoke_output: Path | None = None, smoke_year: bool = False) -> int:
     app.setFont(QFont("Segoe UI", 10))
     window: CalendarWindow | None = None
     try:
-        window = CalendarWindow(smoke_output=smoke_output, smoke_year=smoke_year)
+        window = CalendarWindow(smoke_output=smoke_output, smoke_year=smoke_year,
+                                smoke_manual=smoke_manual, smoke_quote=smoke_quote)
         window.show()
     except (OSError, ValueError, RuntimeError) as exc:
         if smoke_output is not None:
@@ -1042,4 +1126,9 @@ def run(*, smoke_output: Path | None = None, smoke_year: bool = False) -> int:
         QMessageBox.critical(None, "启动失败", str(exc))
         return 1
     result = app.exec()
-    return window.exit_code if smoke_output is not None else result
+    exit_code = window.exit_code
+    window.poll_timer.stop()
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+    return exit_code if smoke_output is not None else result

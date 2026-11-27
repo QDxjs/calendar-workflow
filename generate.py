@@ -20,7 +20,10 @@ from calendar_layout_f import render_f
 from calendar_layout_g import render_g
 from calendar_layout_h import render_h
 from calendar_layout_i import render_i
-from calendar_imports import prepare_pages as _prepare_pages, prepare_replay as _prepare_replay
+from calendar_imports import (
+    ReplayDetails, prepare_pages as _prepare_pages, prepare_replay as _prepare_replay,
+    prepare_replay_with_details as _prepare_replay_with_details,
+)
 from csv_inputs import parse_csv_date, read_rows
 from page_validation import validate_pages as _validate_pages
 from png_renderer import (
@@ -33,7 +36,7 @@ from svg_primitives import (
 )
 from svg_validation import validate_rendering as _validate_rendering
 
-APP_VERSION = "0.5.7"
+APP_VERSION = "0.6.2"
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_ROOT = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
             else Path(__file__).resolve().parent)
@@ -112,6 +115,10 @@ def prepare_pages(input_path: Path, *, seed: int | None = None) -> list[Calendar
 def prepare_replay(manifest_path: Path) -> tuple[list[CalendarPage], int | None]:
     """Recover recorded content and layouts through the stable generator interface."""
     return _prepare_replay(manifest_path, renderers=RENDERERS, validate=validate_pages)
+
+
+def prepare_replay_with_details(manifest_path: Path) -> ReplayDetails:
+    return _prepare_replay_with_details(manifest_path, renderers=RENDERERS, validate=validate_pages)
 
 
 def validate_rendering(

@@ -58,8 +58,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build, collect licenses and verify portable application
-        run: ./build_portable.ps1
+      - name: Build, collect licenses and run full-year portable acceptance
+        run: ./build_portable.ps1 -FullAcceptance
       - name: Export ZIP and SHA-256
         shell: pwsh
         run: |

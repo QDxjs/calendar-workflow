@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from typing import TYPE_CHECKING
+from gallery_assets import GALLERY_SCRIPT, VIEWER_CSS, VIEWER_HTML
 
 if TYPE_CHECKING:
     from calendar_models import CalendarPage
@@ -13,10 +14,11 @@ def escape(value: object) -> str:
 def render_gallery(pages: list[CalendarPage], seed: int | None) -> str:
     cards: list[str] = []
     layouts = sorted({page.layout for page in pages})
+    months = sorted({page.target_date.strftime("%Y-%m") for page in pages})
     for page in pages:
         basename = f"{page.target_date.isoformat()}_layout-{page.layout}"
         cards.append(
-            f'<article class="card" data-layout="{escape(page.layout)}" '
+            f'<article class="card" data-layout="{escape(page.layout)}" data-month="{page.target_date.strftime("%Y-%m")}" '
             f'data-search="{escape(" ".join((page.target_date.isoformat(), page.quote, page.source)))}">'
             f'<a class="preview" href="png/{basename}.png">'
             f'<img loading="lazy" src="png/{basename}.png" alt="{escape(page.target_date.isoformat())} 日历版式 {page.layout}"></a>'
@@ -29,6 +31,8 @@ def render_gallery(pages: list[CalendarPage], seed: int | None) -> str:
     layout_options = ''.join(
         f'<option value="{escape(layout)}">版式 {escape(layout)}</option>' for layout in layouts
     )
+    month_options = ''.join(f'<option value="{month}">{month}</option>' for month in months)
+    month_hidden = ' hidden' if len(months) <= 1 else ''
     return (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
@@ -45,24 +49,18 @@ def render_gallery(pages: list[CalendarPage], seed: int | None) -> str:
         'min-width:0;max-width:100%;min-height:2.6rem;padding:.4rem .65rem;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink)}'
         '.result-count{margin:0 0 .55rem;color:var(--muted);font-size:.9rem}[hidden]{display:none!important}'
         '.preview img{display:block;width:100%;height:auto}.details{padding:1rem 1.1rem 1.2rem}h2{font-size:.95rem;'
-        'margin:0 0 .7rem}.quote{font-family:"SimSun",serif;line-height:1.8;margin:.5rem 0}.source{color:var(--muted);'
+        'margin:0 0 .7rem}.quote{font-family:"SimSun",serif;line-height:1.8;margin:.5rem 0;white-space:pre-wrap}.source{color:var(--muted);'
         'font-size:.85rem;margin:.4rem 0}.details{overflow-wrap:anywhere}.links{display:flex;flex-wrap:wrap;gap:1rem;margin:.9rem 0 0;font-size:.85rem}'
         'a{color:#67503f}:focus-visible{outline:2px solid #67503f;outline-offset:3px}'
-        '.preview:focus-visible{outline-offset:-4px;position:relative}</style></head><body>'
+        '.preview:focus-visible{outline-offset:-4px;position:relative}'
+        f'{VIEWER_CSS}</style></head><body>'
         f'<header><h1>每日文学日历</h1><p class="summary">共 {len(pages)} 页 · 随机种子：{escape(seed_label)} · '
         '<a href="manifest.csv">查看生成清单</a></p></header>'
         '<section id="filters" class="toolbar" aria-label="筛选日历" hidden><label for="search">搜索日期、语录或出处'
         '<input id="search" type="search" autocomplete="off" placeholder="例如：2027-01 或 春风"></label>'
         f'<label for="layout">按版式筛选<select id="layout"><option value="">全部版式</option>{layout_options}</select></label>'
+        f'<label for="month"{month_hidden}>按月份筛选<select id="month"><option value="">全部月份</option>{month_options}</select></label>'
         f'<p id="result-count" class="result-count" role="status" aria-live="polite">显示 {len(pages)} / {len(pages)} 页</p></section>'
         f'<main class="gallery">{"".join(cards)}</main>'
-        '<script>(()=>{const search=document.getElementById("search");const layout=document.getElementById("layout");'
-        'const count=document.getElementById("result-count");const cards=[...document.querySelectorAll(".card")];'
-        'const normalize=value=>value.normalize("NFKC").toLowerCase();'
-        'const entries=cards.map(card=>({card,text:normalize(card.dataset.search)}));'
-        'const update=()=>{const term=normalize(search.value).trim();const selected=layout.value;let visible=0;'
-        'for(const {card,text} of entries){const match=(!term||text.includes(term))&&(!selected||card.dataset.layout===selected);'
-        'card.hidden=!match;if(match)visible+=1}count.textContent=visible?`显示 ${visible} / ${cards.length} 页`:"未找到匹配的日历页"};'
-        'search.addEventListener("input",update);layout.addEventListener("change",update);'
-        'update();document.getElementById("filters").hidden=false})();</script></body></html>'
+        f'{VIEWER_HTML}<script>{GALLERY_SCRIPT}</script></body></html>'
     )

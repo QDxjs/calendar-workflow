@@ -10,13 +10,16 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import platform
+import queue
 import sys
 import tempfile
+import threading
 import xml.etree.ElementTree as ET
 
 from calendar_models import BatchCancelled
 from generate import APP_VERSION, LAYOUT_LABELS, prepare_replay, validate_png, write_batch
 from quote_library import QUOTE_CATEGORIES, QUOTE_DIRECTORY, builtin_quotes, display_attribution, normalize_quote_key
+from batch_history import run_history_scan, scan_history
 
 
 class PreviewLinks(HTMLParser):
@@ -112,6 +115,19 @@ def verify_output(root: Path, *, full_year: bool) -> int:
         folder = batch / suffix
         require({item.name for item in folder.iterdir()} == {f"{name}.{suffix}" for name in basenames}, f"Unexpected files in {folder}.")
     require(links.links == expected_links, "Preview links do not match the manifest and generated files.")
+    history = list(scan_history(root))
+    require(len(history) == 1, "History did not discover the generated batch.")
+    summary = history[0]
+    require(not summary.error and len(summary.pages) == count and summary.seed == 31415,
+            "History content differs from the batch manifest.")
+    require(summary.has_preview and summary.missing_png == 0 and summary.missing_svg == 0,
+            "History did not recognize the generated batch files.")
+    cancelled = threading.Event()
+    cancelled.set()
+    history_events = queue.Queue()
+    run_history_scan(root, cancelled, history_events)
+    require(history_events.get_nowait() == ("cancelled", None) and history_events.empty(),
+            "History cancellation leaked a batch result.")
     return count
 
 
@@ -184,13 +200,70 @@ def verify_portable(*, full_year: bool) -> int:
                 return exit_code
             count = verify_output(output, full_year=full_year)
             verify_replay(output, scratch_root)
+            verify_manual_workflow(scratch_root)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, ET.ParseError, csv.Error) as exc:
         print(f"Portable acceptance failed: {exc}", file=sys.stderr)
         return 1
     report_output_success(count)
     print("Nine layout examples and first-page preview/export PNG consistency passed.", flush=True)
     print("Sample manifest replay, cancellation cleanup and retry passed.", flush=True)
+    print("History discovery, manifest summary and independent cancellation passed.", flush=True)
+    print("Manual desktop preview/export consistency, blank/source-only nine-layout output and lossless replay passed.", flush=True)
     return 0
+
+
+def verify_manual_workflow(scratch: Path) -> None:
+    """Exercise packaged imports, the actual manual desktop path and nine PNGs."""
+    from content_sources import ManualQuoteError, ManualQuoteSource, plan_manual_page
+    from desktop import run
+
+    output = scratch / "manual-desktop"
+    require(run(smoke_output=output, smoke_manual=True) == 0, "Manual desktop smoke failed.")
+    batches = list(scan_history(output))
+    require(len(batches) == 1 and not batches[0].error, "Manual batch not recognized by history.")
+    batch = batches[0]
+    require(len(batch.pages) == 1 and batch.manifest_updated != "未知", "Manual history details missing.")
+    page = batch.pages[0]
+    require(page.quote == '春风又绿江南岸\n明月 <日常> & "文字"'
+            and page.source == page.quote_id == "", "Manual draft was changed or corpus UUID leaked.")
+    require(batch.seed == 31415 and batch.status == "文件齐全", "Manual batch metadata differs.")
+    manual = ManualQuoteSource(page.quote)
+    pages = [plan_manual_page(page.target_date, manual, layout, 31415).pages[0] for layout in LAYOUT_LABELS]
+    nine = scratch / "manual-nine-layouts"
+    write_batch(pages, nine, seed=31415, on_progress=lambda *_: None)
+    restored, seed = prepare_replay(nine / "manifest.csv")
+    require(restored == pages and seed == 31415, "Manual multiline replay was not lossless.")
+    for candidate in pages:
+        validate_png(nine / "png" / f"{candidate.target_date}_layout-{candidate.layout}.png")
+    long_content = ManualQuoteSource("\n".join(["春风又绿江南岸"] * 5))
+    for sample_seed in range(4):
+        chosen = plan_manual_page(page.target_date, long_content, "RANDOM", sample_seed)
+        require(chosen.pages[0].layout in "AE", "Random manual layout did not filter overflowing templates.")
+    try:
+        plan_manual_page(page.target_date, ManualQuoteSource("\n".join(["春"] * 6)), "RANDOM", 17)
+    except ManualQuoteError:
+        pass
+    else:
+        raise ValueError("Manual planner accepted a quote overflowing every template.")
+    blank_output = scratch / "manual-blank-desktop"
+    require(run(smoke_output=blank_output, smoke_manual=True, smoke_quote="") == 0,
+            "Blank manual desktop preview/export failed.")
+    blank_history = list(scan_history(blank_output))
+    require(len(blank_history) == 1 and blank_history[0].status == "文件齐全",
+            "Blank desktop batch could not be restored by history.")
+    require(blank_history[0].pages[0].quote == blank_history[0].pages[0].source == "",
+            "Blank desktop content changed.")
+    for index, source in enumerate(("", "原样署名")):
+        blanks = [plan_manual_page(page.target_date + timedelta(days=offset),
+                                  ManualQuoteSource("\n\t ", source), layout, 31415).pages[0]
+                  for offset, layout in enumerate(LAYOUT_LABELS)]
+        blank_batch = scratch / f"manual-blank-{index}"
+        write_batch(blanks, blank_batch, seed=31415, on_progress=lambda *_: None)
+        blank_pages, blank_seed = prepare_replay(blank_batch / "manifest.csv")
+        require(blank_pages == blanks and blank_seed == 31415,
+                "Blank/source-only manual content did not round-trip through the manifest.")
+        for blank in blanks:
+            validate_png(blank_batch / "png" / f"{blank.target_date}_layout-{blank.layout}.png")
 
 
 def main() -> int:
