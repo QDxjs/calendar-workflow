@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-gpu')
@@ -53,6 +54,18 @@ def evaluate(page, expression):
 def check(page, expression, message):
     if not evaluate(page, f'Boolean({expression})'):
         raise AssertionError(message)
+
+
+def wait_for(page, expression, message, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while True:
+        if evaluate(page, f'Boolean({expression})'):
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(message)
+        loop = QEventLoop()
+        QTimer.singleShot(50, loop.quit)
+        loop.exec()
 
 
 def main():
@@ -114,13 +127,13 @@ def main():
         check(page, '!document.getElementById("viewer-stage").classList.contains("fit")', 'Original size failed.')
         js('document.getElementById("viewer").close()')
         js('document.getElementById("month").value="2028-01";document.getElementById("month").dispatchEvent(new Event("change"))')
-        check(page, 'document.querySelectorAll(".card:not([hidden])").length===1', 'Year-month filtering failed.')
+        wait_for(page, 'document.querySelectorAll(".card:not([hidden])").length===1', 'Year-month filtering failed.')
         js('document.querySelector(".card:not([hidden]) .preview").click()')
         check(page, 'document.getElementById("viewer-prev").disabled&&document.getElementById("viewer-next").disabled', 'Filtered lightbox navigation escaped result set.')
         js('document.getElementById("search").value="NO_MATCH";document.getElementById("search").dispatchEvent(new Event("input"))')
-        check(page, '!document.getElementById("viewer").open&&document.querySelectorAll(".card:not([hidden])").length===0', 'Zero-result state failed.')
+        wait_for(page, '!document.getElementById("viewer").open&&document.querySelectorAll(".card:not([hidden])").length===0', 'Zero-result state failed.')
         js('document.getElementById("search").value="";document.getElementById("month").value="";document.getElementById("layout").value="C";document.getElementById("layout").dispatchEvent(new Event("change"))')
-        check(page, 'document.querySelectorAll(".card:not([hidden])").length===1', 'Combined filter reset failed.')
+        wait_for(page, 'document.querySelectorAll(".card:not([hidden])").length===1', 'Combined filter reset failed.')
         js('document.getElementById("layout").value="";document.getElementById("layout").dispatchEvent(new Event("change"));document.querySelector(".preview").click()')
         # Actual key events exercise native Escape and browser focus restoration.
         from PySide6.QtCore import Qt
