@@ -73,7 +73,12 @@ def inspect_batch(directory: Path, check_cancel: Callable[[], None] = lambda: No
 def scan_history(root: Path, check_cancel: Callable[[], None] = lambda: None) -> Iterator[BatchSummary]:
     """Inspect only this batch or immediate children within the selected root."""
     check_cancel()
-    root = root.resolve(strict=True)
+    # Keep the caller's absolute spelling in returned summaries.  Windows can
+    # present the same temporary directory through an 8.3 alias; resolving the
+    # root for display would then make otherwise equal Path values compare
+    # differently.  Use the resolved form only for the containment check.
+    root = root.absolute()
+    resolved_root = root.resolve(strict=True)
     if not root.is_dir():
         raise NotADirectoryError("历史位置不是文件夹。")
     if (root / "manifest.csv").is_file():
@@ -84,7 +89,7 @@ def scan_history(root: Path, check_cancel: Callable[[], None] = lambda: None) ->
         if child.name.startswith(".") or child.name.endswith(".publish-lock"):
             continue
         try:
-            if not child.resolve().is_relative_to(root) or not child.is_dir():
+            if not child.resolve().is_relative_to(resolved_root) or not child.is_dir():
                 continue
             if (child / "manifest.csv").is_file():
                 yield inspect_batch(child, check_cancel)
