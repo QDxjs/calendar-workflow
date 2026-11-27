@@ -62,7 +62,13 @@ def wait_for(page, expression, message, timeout=3.0):
         if evaluate(page, f'Boolean({expression})'):
             return
         if time.monotonic() >= deadline:
-            raise AssertionError(message)
+            state = evaluate(page, 'JSON.stringify({search:document.getElementById("search").value,'
+                                   'month:document.getElementById("month").value,'
+                                   'layout:document.getElementById("layout").value,'
+                                   'visible:document.querySelectorAll(".card:not([hidden])").length,'
+                                   'viewerOpen:document.getElementById("viewer").open,'
+                                   'result:document.getElementById("result-count").textContent})')
+            raise AssertionError(f'{message} Browser state: {state}')
         loop = QEventLoop()
         QTimer.singleShot(50, loop.quit)
         loop.exec()
