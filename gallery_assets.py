@@ -74,7 +74,12 @@ GALLERY_SCRIPT = r"""
   zoom.addEventListener('click',()=>{fit=!fit;stage.classList.toggle('fit',fit);
     zoom.textContent=fit?'100% 原图':'适应窗口';zoom.setAttribute('aria-pressed',String(!fit));});
   image.addEventListener('error',()=>{if(viewer.open){image.hidden=true;byId('viewer-error').hidden=false;}});
-  viewer.addEventListener('close',()=>{active=null;image.removeAttribute('src');
-    if(trigger&&trigger.isConnected&&!trigger.closest('.card').hidden)trigger.focus();});
+  viewer.addEventListener('close',()=>{
+    // A close event is queued; the user may reopen the dialog before it runs.
+    // Do not let the previous close clear the newly active page or its image.
+    if(viewer.open)return;
+    active=null;image.removeAttribute('src');
+    if(trigger&&trigger.isConnected&&!trigger.closest('.card').hidden)trigger.focus();
+  });
 })();
 """
