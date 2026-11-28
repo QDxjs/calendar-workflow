@@ -14,6 +14,8 @@
 
 ## GitHub 验收
 
-推送后确认 Windows/Python 3.10 与 3.12 CI 及 `v0.6.10` 发布工作流结果；GitHub Actions 的发行附件哈希以发行页为准。
+- [CI run 46116647472](https://github.com/QDxjs/calendar-workflow/actions/runs/46116647472)：Windows/Python 3.10 与 3.12 均通过公开文件检查、回归测试、桌面流程、离线 Chromium、全语料版式及 4 种 Qt 缩放。
+- [v0.6.10 Release run 46117001370](https://github.com/QDxjs/calendar-workflow/actions/runs/46117001370)：Windows/Python 3.12 便携构建、许可收集、发行包检查和 366 页全年验收通过，GitHub Release 上传成功。
+- [公开 v0.6.10 发行页](https://github.com/QDxjs/calendar-workflow/releases/tag/v0.6.10) 的 `CalendarWorkflow-0.6.10-windows-x64.zip` 为 52,782,677 字节，SHA-256：`41f78db26a770137188fc9390725fb0f20d2cf8f35f46a343275a52f64b184fa`。下载后校验附件与 306 项包清单，并在隔离的 Python 3.12 便携环境再次完成 366 页全年自检。
 
 模拟 Qt 缩放不代替目标电脑的实际显示器缩放；自动更新仍应在目标 Windows 设备和网络/代理环境中按需实际试用。
