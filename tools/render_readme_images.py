@@ -9,7 +9,6 @@ import queue
 import sys
 import tempfile
 import threading
-import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +24,9 @@ from calendar_models import PreviewCompleted
 from calendar_preview import run_preview_job
 from desktop import APP_STYLE, CalendarWindow
 from generate import APP_VERSION, LAYOUT_LABELS, prepare_pages, write_batch
-from launcher import plan_pages
-from preview_dialogs import BatchPreviewDialog, FirstPageDialog
+from preview_dialogs import FirstPageDialog
 from quote_import_dialog import QuotePreviewDialog
 from quote_library import inspect_quotes
-from quote_picker_dialog import QuotePickerDialog
-from quote_selection import CandidateSampler
 
 
 IMAGES = ROOT / "docs" / "images"
@@ -98,43 +94,6 @@ def main() -> None:
     window.start.setText("20270101")
     window.seed.setText("31415")
     capture(app, window, "desktop.png")
-    picker_quotes = (
-        {"quote": "郁郁涧底松，离离山上苗。", "source": "左思《咏史·郁郁涧底松》", "quote_id": "demo-leftsi"},
-        {"quote": "天地玄黄，宇宙洪荒。", "source": "周兴嗣《千字文》", "quote_id": "demo-qianziwen"},
-        {"quote": "海上生明月，天涯共此时。", "source": "张九龄《望月怀远》", "quote_id": "demo-wangyuehuaiyuan"},
-    )
-
-    picker = QuotePickerDialog(
-        list(picker_quotes), window._date("20270101"), ("A", "C", "F"), "", window,
-    )
-    picker.sampler = CandidateSampler(seed=31415)
-    picker._recommend()
-    picker.show()
-    deadline = time.monotonic() + 15
-    while not picker.use_button.isEnabled() and time.monotonic() < deadline:
-        app.processEvents()
-        time.sleep(0.02)
-    if not picker.use_button.isEnabled():
-        raise RuntimeError(f"Quote picker preview failed: {picker.preview_status.text()}")
-    capture(app, picker, "quote-picker.png")
-    picker.reject()
-    picker.deleteLater()
-
-    batch_plan = plan_pages(
-        [window._date("20270101")], list(picker_quotes), "RANDOM", 31415,
-        pages_per_date=3,
-    )
-    batch_events = queue.Queue()
-    run_preview_job(batch_plan, threading.Event(), batch_events)
-    batch_results = [batch_events.get_nowait() for _ in range(batch_events.qsize())]
-    batch_preview = batch_results[-1]
-    if not isinstance(batch_preview, PreviewCompleted) or len(batch_preview.images) != 3:
-        raise RuntimeError(f"Three-page batch preview failed: {batch_preview}")
-    batch_dialog = BatchPreviewDialog(batch_plan, batch_preview.images, window)
-    capture(app, batch_dialog, "batch-preview.png")
-    batch_dialog.reject()
-    batch_dialog.deleteLater()
-    app.processEvents()
 
     with tempfile.TemporaryDirectory(prefix="calendar-readme-") as scratch:
         scratch_root = Path(scratch)

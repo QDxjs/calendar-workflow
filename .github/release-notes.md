@@ -1,15 +1,9 @@
-0.6.8 修复语录搜索框按 Enter 时误换候选：Enter 立即执行完整搜索，仍需点击“使用这条”确认。整批预览、随机抽选和同日同版式多张的网页翻页、筛选与下载也增加回归检查。
+## 每日文学日历 v0.6.10
 
-此版本包含 0.6.3–0.6.7 的更新：
+0.6.10 修复 Windows 下 GitHub 更新检查与下载的 HTTPS 证书链验证，并继续使用 Windows 系统信任库；系统信任的 HTTPS 代理和缺失的中间证书可正常处理，未受信任的证书仍会被拒绝。
 
-- 可选的每页制作者署名，随 PNG、SVG、网页及批次清单保存，并可从旧清单兼容恢复。
-- 可勾选一项或多项版式；支持全随机、每日期指定正整数张数，以及同一语录按多种版式各生成一张。
-- 单日语录挑选支持 3/5 条随机推荐、正文与出处搜索、真实图片预览及明确确认；预览过期时不能误确认。
-- 整批预览支持逐张导航，与正式生成共用同一内容计划；同日同版式多张使用序号文件名，并兼容旧批次清单。
-- 修复多行正文、出处分隔线和出处重叠；改善下拉框鼠标滚轮、窗口尺寸适配及最近成功批次目录入口。
+0.6.9 为 Windows 便携版增加手动检查更新、下载进度和确认后安装。程序会核对 GitHub Release 标签、固定附件名、SHA-256 和 ZIP 内容清单，拒绝路径越界及特殊文件；独立安装进程等待旧程序退出，保留 `calendar_runs/`，安装或重启失败时回滚旧版。
 
-完整变更见 [CHANGELOG.md](https://github.com/QDxjs/calendar-workflow/blob/v0.6.8/CHANGELOG.md)。旧清单仍可恢复，使用当前模板、字体与渲染器重新导出；旧版本的原始像素不作保证。旧网页不会被直接修改。
+此前 0.6.3–0.6.8 增加个人署名、多版式与按日张数、语录搜索挑选和整批预览，并修复搜索框回车行为。完整说明见 [CHANGELOG.md](https://github.com/QDxjs/calendar-workflow/blob/main/CHANGELOG.md)。
 
-Windows x64 用户请下载 `CalendarWorkflow-版本号-windows-x64.zip`，完整解压后双击 `CalendarWorkflow.exe`。保留 `_internal` 与 `Documentation`，无需安装 Python。GitHub 的 Source code 压缩包供开发者使用。
-
-同页 `.sha256` 可核对 ZIP。便携包保留文件完整性清单与第三方许可；应用未使用代码签名。原创代码采用 MIT，Hitokoto 语料、Qt/PySide、resvg 保留各自许可。再次分发或商业使用时应核查相应权利。
+Windows x64 用户下载 `CalendarWorkflow-0.6.10-windows-x64.zip`，完整解压后运行 `CalendarWorkflow.exe`。包内附 ZIP 的 SHA-256 校验文件与第三方许可资料。生成日历仍可离线使用；检查或安装更新需要网络及程序目录写入权限。

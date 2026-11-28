@@ -1,10 +1,10 @@
 # Windows 便携版构建与发布
 
-当前应用版本为 **0.6.8**，本次为本地构建，尚未公开发布。发行前确认 `generate.APP_VERSION` 与 `v0.6.8` 标签一致。普通用户通过 [Releases](https://github.com/QDxjs/calendar-workflow/releases) 下载已公开的 `CalendarWorkflow-版本号-windows-x64.zip`。完整解包后双击 `CalendarWorkflow.exe`；不要单独复制 EXE。
+当前应用版本为 **0.6.10**，发行标签为 `v0.6.10`。普通用户通过 [Releases](https://github.com/QDxjs/calendar-workflow/releases) 下载 `CalendarWorkflow-版本号-windows-x64.zip`。完整解包后双击 `CalendarWorkflow.exe`；不要单独复制 EXE。
 
 ## 推荐：由 GitHub Actions 发布
 
-将代码推送到 `main`，等待 CI 通过，再创建与程序版本一致的 `vX.Y.Z` 标签并推送，下一次应为 `v0.6.8`。`.github/workflows/release.yml` 将：
+将后续代码推送到 `main`，等待 CI 通过，再创建与程序版本一致的新标签。`.github/workflows/release.yml` 将：
 
 1. 确认标签存在、版本号匹配，且提交属于 `main`。
 2. 在 Windows、Python 3.12 下安装固定的构建依赖。
@@ -23,10 +23,10 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
 $env:PATH = "$PWD\.venv\Scripts;$env:PATH"
 $env:QT_QPA_PLATFORM = 'offscreen'
-$env:CALENDAR_RELEASE_DIR = 'CalendarWorkflow-0.6.8'
+$env:CALENDAR_RELEASE_DIR = 'CalendarWorkflow-0.6.10'
 .\build_portable.ps1 -FullAcceptance
-.\export_portable.ps1 -PackageDirectory .\dist\CalendarWorkflow-0.6.8 -ArchivePath .\dist\CalendarWorkflow-0.6.8-windows-x64.zip
-Get-FileHash .\dist\CalendarWorkflow-0.6.8-windows-x64.zip -Algorithm SHA256
+.\export_portable.ps1 -PackageDirectory .\dist\CalendarWorkflow-0.6.10 -ArchivePath .\dist\CalendarWorkflow-0.6.10-windows-x64.zip
+Get-FileHash .\dist\CalendarWorkflow-0.6.10-windows-x64.zip -Algorithm SHA256
 ```
 
 构建脚本会在临时目录打包，缺少锁定依赖时尝试安装；首次安装需要联网。通过自检后才发布到 `dist/CalendarWorkflow/`。如果目标目录已存在，先另行保留旧版或指定新的 `CALENDAR_RELEASE_DIR`，不会覆盖。
@@ -36,6 +36,12 @@ Get-FileHash .\dist\CalendarWorkflow-0.6.8-windows-x64.zip -Algorithm SHA256
 包顶层为 `CalendarWorkflow.exe`、`_internal/`、简明 `README.md`、`Documentation/` 以及运行时生成的 `calendar_runs/`。许可、来源、手册和构建依赖记录位于 `Documentation/`。EXE 内嵌应用图标，运行时必需的 `_internal/assets/calendar.ico` 随包保留，顶层无需额外图标文件。原始 MIT 许可、Hitokoto AGPL 文本、resvg 声明、Qt/PySide 许可与 Python 许可应完整保留。
 
 运行 `CalendarWorkflow.exe --verify-package` 可检查随包文件清单及哈希；`calendar_runs/` 是应用生成的用户数据，不在软件包清单内。哈希清单用于发现复制遗漏或版本混用，不是数字签名。
+
+## 0.6.10 GitHub 更新验收
+
+检查正式 Release 的版本标签和固定 ZIP / `.sha256` 附件名；覆盖最新版本、同版、旧版、缺附件、网络错误、下载中断和哈希不符。解压前拒绝越界路径、重复文件、链接、加密文件和超限归档，解压后检查清单版本并实际运行 `--verify-package`。
+
+使用带旧版与 `calendar_runs/` 样例的临时安装目录验证独立安装脚本：确认等待应用退出、替换后重启、保留用户数据；注入目录占用或重启失败时确认回滚旧版和数据。最终 Windows 便携构建须包含 `_internal/tools/apply_update.ps1` 和 `_internal/tools/update_transport.ps1`；更新请求使用 Windows 系统证书链校验，并保留代理配置。正常生成流程及离线使用继续通过。
 
 ## 0.6.8 搜索键盘与全量回归验收
 

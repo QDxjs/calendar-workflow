@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import date
+from dataclasses import dataclass
+import os
 from pathlib import Path
 import queue
 import re
@@ -46,7 +48,7 @@ from calendar_preview import run_preview_job
 from content_sources import ManualQuoteError, plan_manual_page, validate_manual_source
 from desktop_widgets import LayoutSelectionWidget, PositiveIntegerEdit, SelectionComboBox
 from manual_quote_panel import ManualQuotePanel
-from generate import APP_VERSION, LAYOUT_LABELS, RESOURCE_ROOT, prepare_replay
+from generate import APP_ROOT, APP_VERSION, LAYOUT_LABELS, RESOURCE_ROOT, prepare_replay
 from generation_service import PagePreparation, run_generation_job
 from launcher import OUTPUT_ROOT, plan_pages, unique_output_dir
 from page_validation import INVALID_XML_TEXT
@@ -60,6 +62,10 @@ from preview_dialogs import BatchPreviewDialog, LayoutChooserDialog
 from quote_picker_dialog import QuotePickerDialog
 from quote_library import QUOTE_DIRECTORY, builtin_quotes, inspect_quotes
 from quote_import_dialog import QuotePreviewDialog
+from update_service import (
+    ReleaseInfo, UpdateError, UpdateProgress, check_for_update,
+    download_and_stage_update, launch_update_installer, remove_staged_update,
+)
 
 
 APP_STYLE = """
@@ -167,6 +173,18 @@ class SettingsError(ValueError):
         self.field = field
 
 
+@dataclass(frozen=True)
+class _UpdateCheckResult:
+    release: ReleaseInfo | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class _UpdateDownloadResult:
+    stage_directory: Path | None = None
+    error: str | None = None
+
+
 def check_output_directory(directory: Path) -> None:
     """Check actual creation and writing; the probe is deleted on close."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -206,8 +224,11 @@ class CalendarWindow(QMainWindow):
         self.exit_code = 0
         self.running = False
         self.closing = False
+        self.update_busy = False
+        self.update_installing = False
         self.latest_output_dir: Path | None = None
         self.events: queue.Queue[GenerationEvent] = queue.Queue()
+        self.update_events: queue.Queue[object] = queue.Queue()
         self.cancel_event = threading.Event()
         self._task_kind = "generation"
         self._prepared_plan: GenerationPlan | None = None
@@ -258,6 +279,10 @@ class CalendarWindow(QMainWindow):
         self.poll_timer.setInterval(100)
         self.poll_timer.timeout.connect(self._poll)
         self.poll_timer.start()
+        self.update_poll_timer = QTimer(self)
+        self.update_poll_timer.setInterval(100)
+        self.update_poll_timer.timeout.connect(self._poll_updates)
+        self.update_poll_timer.start()
         if smoke_output is not None:
             QTimer.singleShot(250, self._smoke)
 
@@ -280,9 +305,13 @@ class CalendarWindow(QMainWindow):
         header.addLayout(title_block, 1)
         self.history_button = QPushButton("历史批次")
         self.history_button.clicked.connect(self._show_history)
+        self.update_button = QPushButton("检查更新")
+        self.update_button.setToolTip("从 GitHub 检查 Windows 便携版更新，并校验后安装。")
+        self.update_button.clicked.connect(self._check_updates)
         header_actions = QHBoxLayout()
         header_actions.setSpacing(8)
         header_actions.addWidget(self.history_button)
+        header_actions.addWidget(self.update_button)
         self.open_folder_button = QPushButton("打开本次生成文件夹")
         self.open_folder_button.clicked.connect(self._open_output)
         header_actions.addWidget(self.open_folder_button)
@@ -736,7 +765,8 @@ class CalendarWindow(QMainWindow):
             widget.style().polish(widget)
 
     def _sync_controls(self) -> None:
-        editable = not self.running
+        busy = self.running or self.update_busy
+        editable = not busy
         for widget in (
             self.period, self.start, self.end, self.layout_choice, self.seed,
             self.quantity,
@@ -747,7 +777,7 @@ class CalendarWindow(QMainWindow):
         self.generation_mode.setEnabled(editable and not self.content_panel.is_manual)
         self.creator_input.setEnabled(editable and self.creator_checkbox.isChecked())
         self.reset_button.setEnabled(editable and self._custom_quotes)
-        self.content_panel.set_state(busy=self.running, custom=self._custom_quotes)
+        self.content_panel.set_state(busy=busy, custom=self._custom_quotes)
         self.generate_button.setEnabled(editable and self._settings_valid and not self._output_error)
         self.sample_button.setEnabled(editable and self._settings_valid)
         try:
@@ -758,7 +788,8 @@ class CalendarWindow(QMainWindow):
         self.reroll_button.setToolTip("固定种子会复现相同结果；清空种子后可重抽。" if fixed_seed else "重新抽选整批；后续预览和导出沿用新结果。")
         self.replay_button.setEnabled(editable and not self._output_error)
         self.cancel_button.setEnabled(self.running and not self.cancel_event.is_set())
-        self.preview_button.setEnabled(self.latest_output_dir is not None)
+        self.preview_button.setEnabled(not self.update_busy and self.latest_output_dir is not None)
+        self.update_button.setEnabled(editable)
         self.open_folder_button.setEnabled(editable and self.latest_output_dir is not None)
         self.open_folder_button.setToolTip(
             f"打开最近一次成功生成的批次：{self.latest_output_dir}"
@@ -999,6 +1030,117 @@ class CalendarWindow(QMainWindow):
                 self._replay_manifest(dialog.replay_path)
         finally:
             dialog.deleteLater()
+
+    def _check_updates(self) -> None:
+        if self.running or self.update_busy:
+            return
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(
+                self, "检查更新", "自动更新适用于 GitHub 发布的 Windows 便携版。源码运行请查看项目的 GitHub Releases。",
+            )
+            return
+        self.update_busy = True
+        self.update_button.setText("正在检查…")
+        self.statusBar().showMessage("正在连接 GitHub 检查更新…")
+        self._sync_controls()
+
+        def check() -> None:
+            try:
+                release = check_for_update(APP_VERSION)
+                self.update_events.put(_UpdateCheckResult(release=release))
+            except Exception as exc:
+                self.update_events.put(_UpdateCheckResult(error=str(exc)))
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _start_update_download(self, release: ReleaseInfo) -> None:
+        self.update_button.setText("正在下载…")
+        self.statusBar().showMessage(f"正在下载并校验 v{release.version}…")
+
+        def download() -> None:
+            try:
+                stage = download_and_stage_update(
+                    release,
+                    APP_ROOT,
+                    progress=lambda update: self.update_events.put(update),
+                )
+                self.update_events.put(_UpdateDownloadResult(stage_directory=stage))
+            except Exception as exc:
+                self.update_events.put(_UpdateDownloadResult(error=str(exc)))
+
+        threading.Thread(target=download, daemon=True).start()
+
+    def _finish_update(self, message: str) -> None:
+        self.update_busy = False
+        self.update_button.setText("检查更新")
+        self._sync_controls()
+        self.statusBar().showMessage(message, 8000)
+
+    def _poll_updates(self) -> None:
+        try:
+            while True:
+                event = self.update_events.get_nowait()
+                if isinstance(event, UpdateProgress):
+                    received_mb = event.received / (1024 * 1024)
+                    if event.total:
+                        percent = min(100, int(event.received * 100 / event.total))
+                        total_mb = event.total / (1024 * 1024)
+                        self.update_button.setText(f"下载中 {percent}%")
+                        self.statusBar().showMessage(
+                            f"正在下载更新：{received_mb:.1f} / {total_mb:.1f} MB · 正在校验…",
+                        )
+                    else:
+                        self.update_button.setText(f"已下载 {received_mb:.1f} MB")
+                    continue
+
+                if isinstance(event, _UpdateCheckResult):
+                    if event.error is not None:
+                        self._finish_update("更新检查失败")
+                        QMessageBox.warning(self, "检查更新失败", event.error)
+                        continue
+                    if event.release is None:
+                        self._finish_update(f"当前已是最新版本 v{APP_VERSION}")
+                        QMessageBox.information(self, "检查更新", f"当前已是最新版本 v{APP_VERSION}。")
+                        continue
+
+                    release = event.release
+                    prompt = QMessageBox(self)
+                    prompt.setWindowTitle("发现新版本")
+                    prompt.setIcon(QMessageBox.Icon.Information)
+                    prompt.setTextFormat(Qt.TextFormat.PlainText)
+                    prompt.setText(f"发现新版本 v{release.version}（当前版本 v{APP_VERSION}）。")
+                    prompt.setInformativeText("下载后将校验更新包；确认安装时程序会关闭并自动重启。日历数据会保留。")
+                    prompt.setDetailedText(release.notes or "此版本没有附带发行说明。")
+                    prompt.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    prompt.button(QMessageBox.StandardButton.Yes).setText("下载并安装")
+                    prompt.button(QMessageBox.StandardButton.No).setText("稍后")
+                    if prompt.exec() == QMessageBox.StandardButton.Yes:
+                        self._start_update_download(release)
+                    else:
+                        self._finish_update("已取消更新")
+                    continue
+
+                if isinstance(event, _UpdateDownloadResult):
+                    if event.error is not None or event.stage_directory is None:
+                        self._finish_update("更新下载或校验失败")
+                        QMessageBox.warning(self, "更新失败", event.error or "无法准备更新包。")
+                        continue
+                    try:
+                        helper = RESOURCE_ROOT / "tools" / "apply_update.ps1"
+                        launch_update_installer(event.stage_directory, APP_ROOT, helper, os.getpid())
+                    except (OSError, UpdateError) as exc:
+                        try:
+                            remove_staged_update(event.stage_directory, APP_ROOT)
+                        except OSError:
+                            pass
+                        self._finish_update("无法启动更新安装")
+                        QMessageBox.critical(self, "更新失败", str(exc))
+                        continue
+                    self.update_installing = True
+                    self.statusBar().showMessage("正在关闭程序并安装更新…")
+                    QTimer.singleShot(0, self.close)
+        except queue.Empty:
+            pass
 
     def _open_output(self) -> None:
         if self.running or self.latest_output_dir is None:
@@ -1405,6 +1547,10 @@ class CalendarWindow(QMainWindow):
             self._cancel()
             event.ignore()
             return
+        if self.update_busy and not self.update_installing:
+            self.statusBar().showMessage("更新仍在检查或下载；完成后即可关闭。")
+            event.ignore()
+            return
         event.accept()
 
 
@@ -1433,6 +1579,7 @@ def run(*, smoke_output: Path | None = None, smoke_year: bool = False,
     result = app.exec()
     exit_code = window.exit_code
     window.poll_timer.stop()
+    window.update_poll_timer.stop()
     window.close()
     window.deleteLater()
     app.processEvents()

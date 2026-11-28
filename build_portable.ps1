@@ -89,7 +89,9 @@ $arguments = @(
     "--specpath", (Join-Path $buildRoot "spec"),
     "--add-data", ((Join-Path $PSScriptRoot "tools/resvg/resvg.exe") + ";tools/resvg"),
     "--add-data", ((Join-Path $PSScriptRoot "data/hitokoto") + ";data/hitokoto"),
-    "--add-data", ((Join-Path $PSScriptRoot "assets/calendar.ico") + ";assets")
+    "--add-data", ((Join-Path $PSScriptRoot "assets/calendar.ico") + ";assets"),
+    "--add-data", ((Join-Path $PSScriptRoot "tools/apply_update.ps1") + ";tools"),
+    "--add-data", ((Join-Path $PSScriptRoot "tools/update_transport.ps1") + ";tools")
 )
 python @arguments launcher.py
 if ($LASTEXITCODE -ne 0) {
@@ -125,6 +127,8 @@ $requiredPackageFiles = @(
     "CalendarWorkflow.exe",
     "_internal/assets/calendar.ico",
     "_internal/tools/resvg/resvg.exe",
+    "_internal/tools/apply_update.ps1",
+    "_internal/tools/update_transport.ps1",
     "README.md",
     "Documentation/USER_GUIDE.md",
     "Documentation/CHANGELOG.md",

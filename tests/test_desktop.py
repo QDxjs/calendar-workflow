@@ -466,6 +466,29 @@ class DesktopTests(unittest.TestCase):
             self.window._show_history()
             factory.assert_not_called()
 
+    def test_update_entry_explains_source_build_without_network_access(self):
+        with patch.object(desktop.sys, "frozen", False, create=True), \
+                patch("desktop.QMessageBox.information") as message, \
+                patch("desktop.check_for_update") as check:
+            self.window.update_button.click()
+        message.assert_called_once()
+        check.assert_not_called()
+        self.assertTrue(self.window.update_button.isEnabled())
+
+    def test_update_check_reports_current_version_and_restores_controls(self):
+        self.window.update_busy = True
+        self.window.update_button.setText("正在检查…")
+        self.window._sync_controls()
+        self.assertFalse(self.window.generate_button.isEnabled())
+        self.assertFalse(self.window.update_button.isEnabled())
+        self.window.update_events.put(desktop._UpdateCheckResult())
+        with patch("desktop.QMessageBox.information") as message:
+            self.window._poll_updates()
+        message.assert_called_once()
+        self.assertIn(desktop.APP_VERSION, message.call_args.args[2])
+        self.assertFalse(self.window.update_busy)
+        self.assertTrue(self.window.update_button.isEnabled())
+
     def test_reset_clears_custom_preference_even_when_default_is_read_only(self):
         import preferences
         preferences.save_output_directory(self.root / "custom")
