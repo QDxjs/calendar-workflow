@@ -1,10 +1,10 @@
 # Windows 便携版构建与发布
 
-当前应用版本为 **0.6.2**。发行前确认 `generate.APP_VERSION` 与 `v0.6.2` 标签一致。普通用户通过 [Releases](https://github.com/QDxjs/calendar-workflow/releases) 下载 `CalendarWorkflow-版本号-windows-x64.zip`。完整解包后双击 `CalendarWorkflow.exe`；不要单独复制 EXE。
+当前应用版本为 **0.6.8**，本次为本地构建，尚未公开发布。发行前确认 `generate.APP_VERSION` 与 `v0.6.8` 标签一致。普通用户通过 [Releases](https://github.com/QDxjs/calendar-workflow/releases) 下载已公开的 `CalendarWorkflow-版本号-windows-x64.zip`。完整解包后双击 `CalendarWorkflow.exe`；不要单独复制 EXE。
 
 ## 推荐：由 GitHub Actions 发布
 
-将代码推送到 `main`，等待 CI 通过，再创建与程序版本一致的 `vX.Y.Z` 标签并推送，当前为 `v0.6.2`。`.github/workflows/release.yml` 将：
+将代码推送到 `main`，等待 CI 通过，再创建与程序版本一致的 `vX.Y.Z` 标签并推送，下一次应为 `v0.6.8`。`.github/workflows/release.yml` 将：
 
 1. 确认标签存在、版本号匹配，且提交属于 `main`。
 2. 在 Windows、Python 3.12 下安装固定的构建依赖。
@@ -23,9 +23,10 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
 $env:PATH = "$PWD\.venv\Scripts;$env:PATH"
 $env:QT_QPA_PLATFORM = 'offscreen'
-.\build_portable.ps1
-.\export_portable.ps1 -PackageDirectory .\dist\CalendarWorkflow -ArchivePath .\dist\CalendarWorkflow-0.6.2-windows-x64.zip
-Get-FileHash .\dist\CalendarWorkflow-0.6.2-windows-x64.zip -Algorithm SHA256
+$env:CALENDAR_RELEASE_DIR = 'CalendarWorkflow-0.6.8'
+.\build_portable.ps1 -FullAcceptance
+.\export_portable.ps1 -PackageDirectory .\dist\CalendarWorkflow-0.6.8 -ArchivePath .\dist\CalendarWorkflow-0.6.8-windows-x64.zip
+Get-FileHash .\dist\CalendarWorkflow-0.6.8-windows-x64.zip -Algorithm SHA256
 ```
 
 构建脚本会在临时目录打包，缺少锁定依赖时尝试安装；首次安装需要联网。通过自检后才发布到 `dist/CalendarWorkflow/`。如果目标目录已存在，先另行保留旧版或指定新的 `CALENDAR_RELEASE_DIR`，不会覆盖。
@@ -35,6 +36,24 @@ Get-FileHash .\dist\CalendarWorkflow-0.6.2-windows-x64.zip -Algorithm SHA256
 包顶层为 `CalendarWorkflow.exe`、`_internal/`、简明 `README.md`、`Documentation/` 以及运行时生成的 `calendar_runs/`。许可、来源、手册和构建依赖记录位于 `Documentation/`。EXE 内嵌应用图标，运行时必需的 `_internal/assets/calendar.ico` 随包保留，顶层无需额外图标文件。原始 MIT 许可、Hitokoto AGPL 文本、resvg 声明、Qt/PySide 许可与 Python 许可应完整保留。
 
 运行 `CalendarWorkflow.exe --verify-package` 可检查随包文件清单及哈希；`calendar_runs/` 是应用生成的用户数据，不在软件包清单内。哈希清单用于发现复制遗漏或版本混用，不是数字签名。
+
+## 0.6.8 搜索键盘与全量回归验收
+
+在语录搜索框使用回车和数字键盘 Enter，须保留完整匹配结果，不触发随机推荐或确认；已有默认按钮时同样不得误确认。切换候选、取消和显式确认继续正常。离线 Chromium 额外核对同日同版式多张的翻页、筛选及 PNG/SVG 下载目标。执行完整回归、全语料九版式检查、Qt 缩放 1/1.25/1.5/2 的界面检查和打包全年验收。Qt 模拟缩放不代替真实系统缩放或干净目标机验收。
+
+## 0.6.7 随机数量与语录挑选验收
+
+确认启动默认全随机、1 张 / per Date，仅正整数；两日期、数量 3 时共 6 张，版式池 A+B 不再乘以 2，语录批内不重复且容量按总张数校验。保留同语录多版式及单日手写行为。固定种子可复现，不静默改种子。
+
+核对单日候选 3/5 条、刷新不重复、耗尽提示、跨正文与出处多关键词、全半角/标点/大小写归一、无匹配与不足条数；确认与取消分开，换版式保留已选语录，更换语料解除旧指定。快速切换候选不得显示或确认过期预览。
+
+全批预览必须逐页与导出 PNG 一致，涵盖同日同版式多张；检查页序号、网页链接、历史摘要、新旧清单恢复以及失败/取消清理。`tools/verify_desktop_ui.py` 额外捕获语录挑选与整批预览，在 Qt 缩放 1、1.25、1.5 检查三种主窗口模式与尺寸。最终构建执行 `-FullAcceptance`，输出到新的版本目录。
+
+## 0.6.6 多选与文字间距验收
+
+执行 `python tools/verify_calendar_layouts.py --output output/validation-v0.6.6/layouts`，对内置语录逐条执行九版式 SVG 排版，并使用用户反馈的 2026-11-28 原语录导出九张同尺寸 PNG、清单恢复结果和联系表。核对 C 版式的正文末行、分隔线及出处间距；正文较长和两行出处须仍位于模板文字区域内。
+
+全套回归需覆盖复选框多选/全选/随机互斥、鼠标滚轮防误触、天数乘版式数、同日共用语录、手写溢出不跳版、首张与正式导出一致及清单恢复。`tools/verify_desktop_ui.py` 检查三种窗口尺寸和语录/手写模式，并检查窄版式示意窗口；按 Qt 缩放 1、1.25、1.5 分别执行。本版调整共享排版，打包使用 `-FullAcceptance`，便携自检额外覆盖实际多选桌面导出与原交叉案例。
 
 ## 0.6.2 空正文修订验收
 

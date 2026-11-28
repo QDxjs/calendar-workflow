@@ -12,7 +12,7 @@ def validate_rendering(
     pages: list[CalendarPage],
     *,
     renderers: Mapping[str, Callable[[dict[str, object]], str]],
-    metadata: Callable[[object, str, str, str], dict[str, object]],
+    metadata: Callable[..., dict[str, object]],
     validate_pages: Callable[[list[CalendarPage]], None],
     exhaustive_random_layouts: bool = False,
     check_cancel: Callable[[], None] | None = None,
@@ -27,7 +27,9 @@ def validate_rendering(
             if check_cancel is not None:
                 check_cancel()
             try:
-                svg_content = renderer(metadata(page.target_date, candidate_layout, page.quote, page.source))
+                svg_content = renderer(metadata(
+                    page.target_date, candidate_layout, page.quote, page.source, page.creator,
+                ))
                 if not isinstance(svg_content, str):
                     raise ValueError("模板没有返回 SVG 文本。")
                 svg_root = ET.fromstring(svg_content)

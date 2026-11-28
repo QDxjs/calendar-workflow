@@ -131,16 +131,24 @@ def balance_quote_lines(lines: list[str], max_em: float) -> list[str]:
     return balanced
 
 
+def _label_lines(value: str, width: float, font_size: float,
+                 max_lines: int) -> tuple[list[str], float]:
+    lines = wrap_text(value, width / (font_size * 1.08))
+    while len(lines) > max_lines and font_size > 14:
+        font_size = max(14, font_size - 1)
+        lines = wrap_text(value, width / (font_size * 1.08))
+    if len(lines) > max_lines:
+        raise ValueError(f"出处无法在 {max_lines} 行内完整排版；请缩短出处或调整版式。")
+    return lines, font_size
+
+
 def label_block(value: str, *, x: float, y: float, width: float, font_size: float,
                 anchor: str = "middle", weight: str = "normal", max_lines: int = 2,
                 family: str = SERIF, color: str = INK) -> str:
     """Fit an attribution into a compact one- or two-line label."""
     if not value:
         return ""
-    lines = wrap_text(value, width / (font_size * 1.08))
-    while len(lines) > max_lines and font_size > 14:
-        font_size -= 1
-        lines = wrap_text(value, width / (font_size * 1.08))
+    lines, font_size = _label_lines(value, width, font_size, max_lines)
     gap = font_size * 1.18
     first_y = y - (len(lines) - 1) * gap / 2
     pieces = [f'<text x="{x}" y="{first_y}" text-anchor="{anchor}" fill="{color}" '
@@ -155,7 +163,9 @@ def quote_block(value: str, source: str, *, x: float, y: float, width: float,
                 max_height: float, font_size: float, color: str = INK,
                 line_gap: float = 1.38, max_lines: int | None = None,
                 align: str = "middle", source_color: str = INK,
-                rule_color: str = MID) -> str:
+                rule_color: str = MID, top: float | None = None,
+                bottom: float | None = None) -> str:
+    anchor = {"start": "start", "middle": "middle", "end": "end"}.get(align, "middle")
     if not value.strip():
         if not source:
             return ""
@@ -163,40 +173,55 @@ def quote_block(value: str, source: str, *, x: float, y: float, width: float,
                            font_size=max(20, font_size * 0.54),
                            anchor={"start": "start", "end": "end"}.get(align, "middle"),
                            color=source_color)
-    max_em = width / (font_size * 1.08)
-    lines = balance_quote_lines(wrap_text(value, max_em), max_em)
-    while len(lines) * font_size * line_gap > max_height and font_size > 24:
-        font_size -= 2
+    while True:
         max_em = width / (font_size * 1.08)
         lines = balance_quote_lines(wrap_text(value, max_em), max_em)
-    while max_lines and len(lines) > max_lines and font_size > 18:
-        font_size -= 2
-        max_em = width / (font_size * 1.08)
-        lines = balance_quote_lines(wrap_text(value, max_em), max_em)
-    if max_lines and len(lines) > max_lines:
-        raise ValueError(f"语录无法在 {max_lines} 行内完整排版；请缩短正文或调整版式参数。")
-    gap = font_size * line_gap
-    block_height = len(lines) * gap
-    first_y = y - block_height / 2 + font_size * 0.82
-    anchor = {"start": "start", "middle": "middle", "end": "end"}.get(align, "middle")
-    pieces = [f'<text x="{x}" y="{first_y}" text-anchor="{anchor}" fill="{color}" '
+        gap = font_size * line_gap
+        block_height = len(lines) * gap
+        first_y = y - block_height / 2 + font_size * 0.82
+        content_top = first_y - font_size
+        content_bottom = first_y + (len(lines) - 1) * gap + font_size * 0.25
+        source_y = rule_y = 0.0
+        source_font = max(20, font_size * 0.54)
+        if source:
+            source_lines, source_font = _label_lines(source, width * 0.9, source_font, 2)
+            rule_y = content_bottom + 22
+            source_first_y = rule_y + 18 + source_font
+            source_span = (len(source_lines) - 1) * source_font * 1.18
+            source_y = source_first_y + source_span / 2
+            content_bottom = source_first_y + source_span + source_font * 0.25
+        fits = (block_height <= max_height and (not max_lines or len(lines) <= max_lines)
+                and (top is None or bottom is None or content_bottom - content_top <= bottom - top))
+        if fits:
+            break
+        if font_size <= 18:
+            raise ValueError("语录或出处无法在当前版式的文字区域内完整排版；请缩短文字或调整换行。")
+        font_size = max(18, font_size - 2)
+    lower_shift = top - content_top if top is not None else float("-inf")
+    upper_shift = bottom - content_bottom if bottom is not None else float("inf")
+    shift = max(lower_shift, min(0, upper_shift))
+    first_y += shift
+    source_y += shift
+    rule_y += shift
+    pieces = ['<g data-role="quote-block">',
+              f'<text x="{x}" y="{first_y}" text-anchor="{anchor}" fill="{color}" '
               f'font-family="{SERIF}" font-size="{font_size}">']
     for index, item in enumerate(lines):
         dy = 0 if index == 0 else gap
         pieces.append(f'<tspan x="{x}" dy="{dy}">{esc(item)}</tspan>')
     pieces.append("</text>")
     if source:
-        source_y = y + min(max_height * 0.43, block_height / 2 + 62)
         if anchor == "start":
             rule_x1, rule_x2 = x, x + 70
         elif anchor == "end":
             rule_x1, rule_x2 = x - 70, x
         else:
             rule_x1, rule_x2 = x - 35, x + 35
-        pieces.append(line(rule_x1, source_y - 35, rule_x2, source_y - 35, 1.2, rule_color))
+        pieces.append(line(rule_x1, rule_y, rule_x2, rule_y, 1.2, rule_color))
         pieces.append(label_block(source, x=x, y=source_y, width=width * 0.9,
-                                  font_size=max(20, font_size * 0.54), anchor=anchor,
+                                  font_size=source_font, anchor=anchor,
                                   color=source_color))
+    pieces.append("</g>")
     return "\n".join(pieces)
 
 
@@ -228,7 +253,59 @@ def svg_open(title: str) -> list[str]:
             f'<title>{esc(title)}</title>', common_defs()]
 
 
-def metadata(d: date, layout: str, quote: str, source: str) -> dict[str, object]:
+CREATOR_COLOR = "#55534e"
+
+
+def has_cjk(value: str) -> bool:
+    return any(unicodedata.east_asian_width(char) in ("F", "W") for char in value)
+
+
+def footer_brand(
+    x: float,
+    y: float,
+    creator: str = "",
+    *,
+    brand_size: float = 16,
+    brand_spacing: float = 0.5,
+    brand_italic: bool = True,
+    max_width: float = 500,
+    creator_y: float | None = None,
+    creator_size: float | None = None,
+    creator_family: str | None = None,
+    creator_max_width: float | None = None,
+    anchor: str = "middle",
+) -> str:
+    """Render the signature BRAND tagline and an optional creator colophon below it."""
+    clean_creator = creator.strip()
+    if not clean_creator:
+        return text(
+            x, y, BRAND, brand_size,
+            anchor=anchor, family=LATIN, italic=brand_italic,
+            spacing=brand_spacing, max_width=max_width,
+        )
+    c_y = y + 24 if creator_y is None else creator_y
+    c_size = max(11.0, brand_size - 2.5) if creator_size is None else creator_size
+    cjk = has_cjk(clean_creator)
+    c_family = creator_family or (SERIF if cjk else LATIN)
+    c_spacing = 1.2 if cjk else 0.7
+    c_max_w = max_width if creator_max_width is None else creator_max_width
+    return "\n".join([
+        text(
+            x, y, BRAND, brand_size,
+            anchor=anchor, family=LATIN, italic=brand_italic,
+            spacing=brand_spacing, max_width=max_width,
+        ),
+        text(
+            x, c_y, clean_creator, c_size,
+            anchor=anchor, fill=CREATOR_COLOR, family=c_family,
+            spacing=c_spacing, max_width=c_max_w,
+        ),
+    ])
+
+
+def metadata(
+    d: date, layout: str, quote: str, source: str, creator: str = "",
+) -> dict[str, object]:
     iso_date = d.isocalendar()
     return {
         "date": d,
@@ -243,4 +320,5 @@ def metadata(d: date, layout: str, quote: str, source: str) -> dict[str, object]
         "layout": layout,
         "quote": quote,
         "source": source,
+        "creator": creator.strip(),
     }

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from svg_primitives import (
-    BRAND, CLAY, INK, LATIN, SANS, line, quote_block,
+    CLAY, INK, LATIN, SANS, footer_brand, line, quote_block,
     rect, svg_open, text,
 )
 
@@ -59,12 +59,14 @@ def render_a(m: dict[str, object]) -> str:
           text(1038, 1004, "LINE", 11, family=SANS, spacing=0.6)]
     p.append(quote_block(str(m["quote"]), str(m["source"]), x=561, y=1004,
                          width=790, max_height=300, font_size=42, max_lines=5,
-                         rule_color=CLAY))
+                         rule_color=CLAY, top=800, bottom=1208))
     p += [rect(48, 1257, 1026, 96), rect(48, 1257, 160, 96), rect(934, 1257, 140, 96),
           text(128, 1294, f'DAY / {m["ordinal"]:03d}', 11.5, spacing=0.6, max_width=140),
           text(128, 1321, "READING FILE", 11.5, spacing=0.5, max_width=140),
-          line(242, 1305, 330, 1305), text(591, 1314, BRAND, 16, family=LATIN,
-          italic=True, spacing=0.5, max_width=500),
+          line(242, 1305, 330, 1305),
+          footer_brand(591, 1296 if m.get("creator") else 1314, str(m.get("creator", "")),
+                       brand_size=16, brand_spacing=0.5, max_width=500,
+                       creator_y=1326, creator_size=12.5, creator_max_width=500),
           line(852, 1305, 914, 1305), text(1004, 1297, f'NO. {m["ordinal"]:03d}', 11.5, spacing=0.3,
           max_width=126), text(1004, 1321, "DAILY INDEX", 11.5, spacing=0.3,
           max_width=126), "</svg>"]

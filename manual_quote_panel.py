@@ -2,11 +2,12 @@
 
 from PySide6.QtCore import QSignalBlocker, Signal, Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
 from content_sources import ManualQuoteSource
+from desktop_widgets import SelectionComboBox
 
 
 class ManualQuotePanel(QFrame):
@@ -21,7 +22,7 @@ class ManualQuotePanel(QFrame):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(14, 12, 14, 12)
         outer.setSpacing(8)
-        self.selector = QComboBox()
+        self.selector = SelectionComboBox()
         self.selector.setAccessibleName("内容来源")
         self.selector.addItem("语录库抽选", "corpus")
         self.selector.addItem("单日手写", "manual")
@@ -35,6 +36,19 @@ class ManualQuotePanel(QFrame):
         self.corpus_label.setTextFormat(Qt.TextFormat.PlainText)
         self.corpus_label.setWordWrap(True)
         corpus.addWidget(self.corpus_label)
+        self.selected_label = QLabel("自动抽选 · 每张语录由程序随机选择")
+        self.selected_label.setWordWrap(True)
+        self.selected_label.setTextFormat(Qt.TextFormat.PlainText)
+        corpus.addWidget(self.selected_label)
+        choose = QHBoxLayout()
+        self.pick_button = QPushButton("挑选语录 / 搜索…")
+        self.auto_button = QPushButton("恢复自动抽选")
+        self.auto_button.setObjectName("quietButton")
+        self.auto_button.hide()
+        choose.addWidget(self.pick_button)
+        choose.addWidget(self.auto_button)
+        choose.addStretch(1)
+        corpus.addLayout(choose)
         buttons = QHBoxLayout()
         self.import_button = QPushButton("导入语录")
         self.reset_button = QPushButton("恢复内置")
@@ -115,8 +129,19 @@ class ManualQuotePanel(QFrame):
         self.manual_area.setVisible(self.is_manual)
         self.import_button.setEnabled(not self._busy)
         self.reset_button.setEnabled(not self._busy and self._custom)
+        self.pick_button.setEnabled(not self._busy and self._single_day)
+        self.pick_button.setToolTip("从完整语录库推荐或搜索，确认后进入同语录换版式。" if self._single_day else "语录挑选先支持单日；多日按每个日期自动抽选。")
+        self.auto_button.setEnabled(not self._busy)
         for widget in (self.quote_edit, self.source_edit, self.clear_button):
             widget.setEnabled(not self._busy)
+
+    def set_selected_quote(self, quote: dict[str, str] | None, *, active: bool, random_mode: bool) -> None:
+        self.auto_button.setVisible(quote is not None)
+        if quote is not None:
+            state = "已选定" if active else "已保留，切回单日同语录模式使用"
+            self.selected_label.setText(f"{state}\n{quote['quote']}\n{quote['source']}")
+        else:
+            self.selected_label.setText("自动抽选 · 每张独立随机语录" if random_mode else "自动抽选 · 每个日期一条语录，应用到所选版式")
 
     def show_error(self, field: str = "", message: str = "") -> None:
         for name, label, widget in (("quote", self.quote_error, self.quote_edit),

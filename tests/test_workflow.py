@@ -66,6 +66,12 @@ class InputTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_pages([page])
 
+        creator_page = CalendarPage(
+            date(2027, 1, 1), "A", "A", "雨后记得开窗。", "示例", creator="小林\x00出品",
+        )
+        with self.assertRaises(ValueError):
+            validate_pages([creator_page])
+
 
 class PublicationTests(unittest.TestCase):
     @classmethod
@@ -94,6 +100,21 @@ class PublicationTests(unittest.TestCase):
             corrupt.write_bytes(data)
             with self.assertRaises(RuntimeError):
                 validate_png(corrupt)
+
+    def test_creator_column_round_trips_and_renders_across_all_layouts(self) -> None:
+        branded = [
+            CalendarPage(p.target_date, p.layout_selection, p.layout, p.quote, p.source, p.quote_id, "小林出品")
+            for p in self.pages
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            batch = Path(temporary) / "branded"
+            self.assertEqual(write_batch(branded, batch, seed=31415, on_progress=lambda *_: None), 9)
+            replayed, seed = prepare_replay(batch / "manifest.csv")
+            self.assertEqual((replayed, seed), (branded, 31415))
+            for page in branded:
+                svg_text = (batch / "svg" / f"{page.target_date.isoformat()}_layout-{page.layout}.svg").read_text(encoding="utf-8")
+                self.assertIn("Every day has a margin.", svg_text)
+                self.assertIn("小林出品", svg_text)
 
     def test_existing_batch_is_never_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

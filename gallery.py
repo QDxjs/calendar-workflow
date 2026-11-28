@@ -16,7 +16,7 @@ def render_gallery(pages: list[CalendarPage], seed: int | None) -> str:
     layouts = sorted({page.layout for page in pages})
     months = sorted({page.target_date.strftime("%Y-%m") for page in pages})
     for page in pages:
-        basename = f"{page.target_date.isoformat()}_layout-{page.layout}"
+        basename = page.basename
         cards.append(
             f'<article class="card" data-layout="{escape(page.layout)}" data-month="{page.target_date.strftime("%Y-%m")}" '
             f'data-search="{escape(" ".join((page.target_date.isoformat(), page.quote, page.source)))}">'

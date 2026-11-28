@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from svg_primitives import BRAND, CLAY, LATIN, line, quote_block, svg_open, text
+from svg_primitives import CLAY, LATIN, footer_brand, line, quote_block, svg_open, text
 
 
 def render_c(m: dict[str, object]) -> str:
@@ -28,8 +28,10 @@ def render_c(m: dict[str, object]) -> str:
           line(76, 711, 76, 1232, 1.2), line(1046, 711, 1046, 1232, 1.2)]
     p.append(quote_block(str(m["quote"]), str(m["source"]), x=561, y=1054,
                          width=850, max_height=216, font_size=39, max_lines=4,
-                         rule_color=CLAY))
+                         rule_color=CLAY, top=930, bottom=1232))
     p += [line(76, 1272, 1046, 1272),
-          text(561, 1323, BRAND, 17, family=LATIN, italic=True, spacing=1.4,
-               max_width=800), "</svg>"]
+          footer_brand(561, 1312 if m.get("creator") else 1323, str(m.get("creator", "")),
+                       brand_size=17, brand_spacing=1.4, max_width=800,
+                       creator_y=1342, creator_size=13, creator_max_width=800),
+          "</svg>"]
     return "\n".join(p)

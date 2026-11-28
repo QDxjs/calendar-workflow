@@ -60,7 +60,7 @@ def inspect_batch(directory: Path, check_cancel: Callable[[], None] = lambda: No
         missing_png = missing_svg = 0
         for page in pages:
             check_cancel()
-            basename = f"{page.target_date.isoformat()}_layout-{page.layout}"
+            basename = page.basename
             missing_png += not (directory / "png" / f"{basename}.png").is_file()
             missing_svg += not (directory / "svg" / f"{basename}.svg").is_file()
         check_cancel()

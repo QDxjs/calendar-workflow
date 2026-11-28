@@ -19,6 +19,8 @@ def main() -> int:
                         help="批次目录；未指定时自动创建带时间戳的新目录")
     parser.add_argument("--seed", type=int, default=None,
                         help="随机种子；指定后可复现随机版式选择")
+    parser.add_argument("--creator", type=str, default="",
+                        help="可选：在日历页脚额外显示制作者/署名")
     parser.add_argument("--version", action="version", version=f"%(prog)s {app.APP_VERSION}")
     parser.add_argument("--check", action="store_true",
                         help="校验 CSV 与 SVG 排版，不写出文件或 PNG")
@@ -27,11 +29,13 @@ def main() -> int:
         parser.error("--replay 不能与 --seed 同用；恢复模式直接读取清单记录。")
     try:
         if args.replay is not None:
+            if args.creator:
+                parser.error("--replay 不能与 --creator 同用；恢复模式直接读取清单记录。")
             pages, seed = app.prepare_replay(args.replay)
         else:
             input_path = args.input if args.input is not None else Path(__file__).with_name("content.csv")
             seed = args.seed
-            pages = app.prepare_pages(input_path, seed=seed)
+            pages = app.prepare_pages(input_path, seed=seed, creator=args.creator)
         if args.check:
             app.validate_rendering(pages, exhaustive_random_layouts=args.replay is None and seed is None)
             print(f"校验通过：{len(pages)} 页；未写入文件。")

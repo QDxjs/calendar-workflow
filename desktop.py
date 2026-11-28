@@ -10,12 +10,12 @@ import sys
 import tempfile
 import threading
 
-from PySide6.QtCore import QSignalBlocker, QTimer, Qt, QUrl
+from PySide6.QtCore import QEvent, QSignalBlocker, QTimer, Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
-    QComboBox,
+    QCheckBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -44,14 +44,20 @@ from calendar_models import (
 )
 from calendar_preview import run_preview_job
 from content_sources import ManualQuoteError, plan_manual_page, validate_manual_source
+from desktop_widgets import LayoutSelectionWidget, PositiveIntegerEdit, SelectionComboBox
 from manual_quote_panel import ManualQuotePanel
-from generate import LAYOUT_LABELS, RESOURCE_ROOT, prepare_replay
+from generate import APP_VERSION, LAYOUT_LABELS, RESOURCE_ROOT, prepare_replay
 from generation_service import PagePreparation, run_generation_job
 from launcher import OUTPUT_ROOT, plan_pages, unique_output_dir
+from page_validation import INVALID_XML_TEXT
 from periods import dates_between, dates_in_iso_week, dates_in_month, dates_in_year
-from preferences import load_output_directory, preferences_warning, save_output_directory
+from preferences import (
+    load_creator_preferences, load_output_directory, preferences_warning,
+    save_creator_preferences, save_output_directory,
+)
 from history_dialog import HistoryDialog
-from preview_dialogs import FirstPageDialog, LayoutChooserDialog
+from preview_dialogs import BatchPreviewDialog, LayoutChooserDialog
+from quote_picker_dialog import QuotePickerDialog
 from quote_library import QUOTE_DIRECTORY, builtin_quotes, inspect_quotes
 from quote_import_dialog import QuotePreviewDialog
 
@@ -76,7 +82,18 @@ QLineEdit, QComboBox {
 QLineEdit:focus, QComboBox:focus { border: 1px solid #8069eb; background: white; }
 QLineEdit:disabled, QComboBox:disabled { color: #82889a; background: #f4f5f8; }
 QLineEdit[invalid="true"], QPlainTextEdit[invalid="true"] { border-color: #bd3a4a; }
-QComboBox::drop-down { border: none; width: 26px; }
+QListWidget { background: white; border: 1px solid #dfe3ec; border-radius: 8px; }
+QListWidget::item { padding: 8px; border-radius: 6px; }
+QListWidget::item:selected { background: #eeeaff; color: #24283a; }
+QComboBox { padding-right: 42px; }
+QComboBox:hover { border-color: #bcb1f5; }
+QComboBox::drop-down {
+    subcontrol-origin: padding; subcontrol-position: top right; width: 32px;
+    background: #f0edf9; border-left: 1px solid #e4dff2;
+    border-top-right-radius: 7px; border-bottom-right-radius: 7px;
+}
+QComboBox::drop-down:disabled { background: #eceef3; border-left-color: #e0e3eb; }
+QComboBox::down-arrow { image: none; width: 0; height: 0; }
 QComboBox QAbstractItemView { background: white; border: 1px solid #dfe3ec; selection-background-color: #eeeaff; }
 QPushButton {
     color: #41465a; background: white; border: 1px solid #dfe3ec; border-radius: 8px;
@@ -177,12 +194,15 @@ def generation_error_message(error: Exception) -> str:
 
 class CalendarWindow(QMainWindow):
     def __init__(self, *, smoke_output: Path | None = None, smoke_year: bool = False,
-                 smoke_manual: bool = False, smoke_quote: str | None = None) -> None:
+                 smoke_manual: bool = False, smoke_quote: str | None = None,
+                 smoke_layouts: str | None = None, smoke_random_count: int | None = None) -> None:
         super().__init__()
         self.smoke_output = smoke_output
         self.smoke_year = smoke_year
         self.smoke_manual = smoke_manual
         self.smoke_quote = smoke_quote
+        self.smoke_layouts = smoke_layouts
+        self.smoke_random_count = smoke_random_count
         self.exit_code = 0
         self.running = False
         self.closing = False
@@ -195,6 +215,8 @@ class CalendarWindow(QMainWindow):
         self._sample_plan: GenerationPlan | None = None
         self._job_plan: GenerationPlan | None = None
         self._sample_image: bytes | None = None
+        self._sample_images: tuple[tuple[str, bytes], ...] | None = None
+        self._selected_quote: dict[str, str] | None = None
         self._layout_images: tuple[tuple[str, bytes], ...] | None = None
         self._layout_dialog: LayoutChooserDialog | None = None
         self._current_period = "单日"
@@ -205,6 +227,9 @@ class CalendarWindow(QMainWindow):
         self._output_error = ""
         packaged = getattr(sys, "frozen", False)
         self.output_root = load_output_directory(OUTPUT_ROOT)
+        self._creator_enabled_pref, self._creator_text_pref = (
+            load_creator_preferences() if smoke_output is None else (False, "")
+        )
         self._preferences_warning = preferences_warning() if smoke_output is None else ""
         if smoke_output is not None:
             self.output_root = smoke_output
@@ -214,17 +239,17 @@ class CalendarWindow(QMainWindow):
             except OSError as exc:
                 self._output_error = output_error_message(exc)
         self.quotes = builtin_quotes()
-        self.setWindowTitle("每日文学日历")
+        self.setWindowTitle(f"每日文学日历 v{APP_VERSION}")
         screen = QApplication.primaryScreen()
         available = screen.availableGeometry().size() if screen is not None else None
         available_width = available.width() if available is not None else 1280
         available_height = available.height() if available is not None else 800
-        minimum_width = min(850, max(620, available_width - 40))
-        minimum_height = min(600, max(480, available_height - 40))
+        minimum_width = min(680, max(320, available_width - 40))
+        minimum_height = min(540, max(320, available_height - 60))
         self.setMinimumSize(minimum_width, minimum_height)
         self.resize(
-            max(minimum_width, min(1040, int(available_width * 0.86))),
-            max(minimum_height, min(700, int(available_height * 0.88))),
+            max(minimum_width, min(1180, int(available_width * 0.9))),
+            max(minimum_height, min(900, int(available_height * 0.9))),
         )
         self._build()
         QTimer.singleShot(0, self._update_responsive_layout)
@@ -239,22 +264,13 @@ class CalendarWindow(QMainWindow):
     def _build(self) -> None:
         page = QWidget()
         page.setObjectName("page")
-        outer = QHBoxLayout(page)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(24, 20, 24, 16)
+        outer.setSpacing(14)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        content.setObjectName("scrollContent")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(28, 24, 28, 26)
-        content_layout.setSpacing(16)
-
-        header = QHBoxLayout()
+        header = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         header.setSpacing(16)
+        self.header_layout = header
         title_block = QVBoxLayout()
         title_block.setSpacing(4)
         for text, name in (("每日文学日历", "pageTitle"), ("挑选日期与版式，把喜欢的文字变成可以收藏的日历。", "pageSubtitle")):
@@ -264,11 +280,24 @@ class CalendarWindow(QMainWindow):
         header.addLayout(title_block, 1)
         self.history_button = QPushButton("历史批次")
         self.history_button.clicked.connect(self._show_history)
-        header.addWidget(self.history_button)
-        open_folder = QPushButton("打开日历文件夹")
-        open_folder.clicked.connect(self._open_output)
-        header.addWidget(open_folder)
-        content_layout.addLayout(header)
+        header_actions = QHBoxLayout()
+        header_actions.setSpacing(8)
+        header_actions.addWidget(self.history_button)
+        self.open_folder_button = QPushButton("打开本次生成文件夹")
+        self.open_folder_button.clicked.connect(self._open_output)
+        header_actions.addWidget(self.open_folder_button)
+        header.addLayout(header_actions)
+        outer.addLayout(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content.setObjectName("scrollContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
         self.body_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self.body_layout.setSpacing(16)
@@ -276,11 +305,16 @@ class CalendarWindow(QMainWindow):
         self.summary_card = self._summary_card()
         self.body_layout.addWidget(self.settings_card, 3)
         self.body_layout.addWidget(self.summary_card, 2)
+        self.body_layout.setAlignment(self.settings_card, Qt.AlignmentFlag.AlignTop)
+        self.body_layout.setAlignment(self.summary_card, Qt.AlignmentFlag.AlignTop)
         content_layout.addLayout(self.body_layout)
         content_layout.addStretch(1)
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
+        self.actions_card = self._actions_card()
+        outer.addWidget(self.actions_card)
         self.scroll_area = scroll
+        scroll.viewport().installEventFilter(self)
         self.setCentralWidget(page)
         self.statusBar().setSizeGripEnabled(False)
         self.statusBar().showMessage("离线可用 · 内容仅保存在本机")
@@ -289,10 +323,16 @@ class CalendarWindow(QMainWindow):
         super().resizeEvent(event)
         self._update_responsive_layout()
 
+    def eventFilter(self, watched: object, event: object) -> bool:
+        if (hasattr(self, "scroll_area") and watched is self.scroll_area.viewport()
+                and event.type() == QEvent.Type.Resize):
+            self._update_responsive_layout()
+        return super().eventFilter(watched, event)
+
     def _update_responsive_layout(self) -> None:
         if not hasattr(self, "body_layout") or not hasattr(self, "scroll_area"):
             return
-        content_width = self.scroll_area.viewport().width() - 56
+        content_width = self.scroll_area.viewport().width()
         direction = (
             QBoxLayout.Direction.LeftToRight
             if content_width >= 930
@@ -300,6 +340,13 @@ class CalendarWindow(QMainWindow):
         )
         if self.body_layout.direction() != direction:
             self.body_layout.setDirection(direction)
+        header_direction = (
+            QBoxLayout.Direction.LeftToRight
+            if content_width >= 860
+            else QBoxLayout.Direction.TopToBottom
+        )
+        if self.header_layout.direction() != header_direction:
+            self.header_layout.setDirection(header_direction)
 
     def _settings_card(self) -> QWidget:
         card = _card()
@@ -309,11 +356,11 @@ class CalendarWindow(QMainWindow):
         layout.addWidget(_label("生成设置", "sectionTitle"))
         layout.addWidget(_label("选择生成范围、页面风格与语录来源。", "sectionHint"))
 
-        self.period = QComboBox()
+        self.period = SelectionComboBox()
+        self.period.setAccessibleName("生成范围")
         self.period.addItems(("单日", "日期范围", "一周", "月份", "年份"))
         self.period.currentTextChanged.connect(self._update_fields)
         self.period.currentTextChanged.connect(self._refresh_summary)
-        layout.addWidget(_field("生成范围", self.period))
 
         dates_row = QHBoxLayout()
         dates_row.setSpacing(12)
@@ -327,31 +374,67 @@ class CalendarWindow(QMainWindow):
         self.end.textChanged.connect(self._refresh_summary)
         self.end_wrap = _field("结束日期", self.end)
         self.end_wrap.hide()
+        dates_row.addWidget(_field("生成范围", self.period), 1)
         dates_row.addWidget(self.start_wrap, 1)
         dates_row.addWidget(self.end_wrap, 1)
         layout.addLayout(dates_row)
         self.date_error = _error_label()
         layout.addWidget(self.date_error)
 
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(12)
+        self.generation_mode = SelectionComboBox()
+        self.generation_mode.setAccessibleName("制作方式")
+        self.generation_mode.addItem("随机制作 · 每张独立语录与版式", "random")
+        self.generation_mode.addItem("同语录换版式 · 所选版式各一张", "same_quote")
+        self.generation_mode.currentIndexChanged.connect(self._refresh_summary)
+        mode_row.addWidget(_field("制作方式", self.generation_mode), 3)
+        self.quantity = PositiveIntegerEdit()
+        self.quantity.textChanged.connect(self._refresh_summary)
+        self.quantity_wrap = _field("数量（张 / per Date）", self.quantity)
+        mode_row.addWidget(self.quantity_wrap, 2)
+        layout.addLayout(mode_row)
+        self.quantity_error = _error_label()
+        layout.addWidget(self.quantity_error)
+        self.mode_hint = _label("", "sectionHint")
+        self.mode_hint.setWordWrap(True)
+        layout.addWidget(self.mode_hint)
+
         options = QHBoxLayout()
         options.setSpacing(12)
-        self.layout_choice = QComboBox()
-        self.layout_choice.addItem("随机版式", "随机")
-        for letter, label in LAYOUT_LABELS.items():
-            self.layout_choice.addItem(f"{letter} · {label}", letter)
-        self.layout_choice.currentIndexChanged.connect(self._refresh_summary)
+        self.layout_choice = LayoutSelectionWidget(LAYOUT_LABELS)
+        self.layout_choice.setAccessibleName("页面版式")
+        self.layout_choice.selectionChanged.connect(self._refresh_summary)
         self.seed = QLineEdit()
         self.seed.setPlaceholderText("留空则随机")
         self.seed.textChanged.connect(self._refresh_summary)
-        options.addWidget(_field("页面版式", self.layout_choice), 3)
-        options.addWidget(_field("随机种子（可选）", self.seed), 2)
+        self.layout_wrap = _field("版式范围（可多选）", self.layout_choice)
+        options.addWidget(self.layout_wrap, 3,
+                          Qt.AlignmentFlag.AlignTop)
+        options.addWidget(_field("随机种子（可选）", self.seed), 2, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(options)
         self.layouts_button = QPushButton("查看版式示意")
-        self.layouts_button.setToolTip("比较 A–I 九种版式的统一示意图，点击即可选择。")
+        self.layouts_button.setToolTip("比较 A–I 九种版式，可勾选多个版式后确认使用。")
         self.layouts_button.clicked.connect(self._show_layouts)
         layout.addWidget(self.layouts_button)
         self.seed_error = _error_label()
         layout.addWidget(self.seed_error)
+
+        creator_block = QVBoxLayout()
+        creator_block.setSpacing(6)
+        self.creator_checkbox = QCheckBox("在日历页脚添加制作者 / 署名")
+        self.creator_checkbox.setChecked(self._creator_enabled_pref)
+        self.creator_checkbox.setToolTip("保留原有英文标语，并在其下方添加您的名字、昵称或品牌字样。")
+        self.creator_checkbox.toggled.connect(self._on_creator_changed)
+        creator_block.addWidget(self.creator_checkbox)
+        self.creator_input = QLineEdit(self._creator_text_pref)
+        self.creator_input.setPlaceholderText("例如：小林 · 2026 或 Studio Name，最多 32 字")
+        self.creator_input.setEnabled(self.creator_checkbox.isChecked())
+        self.creator_input.textChanged.connect(self._on_creator_changed)
+        creator_block.addWidget(self.creator_input)
+        self.creator_error = _error_label()
+        creator_block.addWidget(self.creator_error)
+        layout.addLayout(creator_block)
 
         self.content_panel = ManualQuotePanel(self._builtin_label())
         self.corpus_label = self.content_panel.corpus_label
@@ -360,6 +443,9 @@ class CalendarWindow(QMainWindow):
         self.reset_button = self.content_panel.reset_button
         self.reset_button.clicked.connect(self._reset_quotes)
         self.content_panel.changed.connect(self._refresh_summary)
+        self.content_panel.pick_button.clicked.connect(self._pick_quote)
+        self.content_panel.auto_button.clicked.connect(self._reset_selected_quote)
+        self.content_panel.selector.currentIndexChanged.connect(self._reveal_content_editor)
         layout.addWidget(self.content_panel)
 
         output = QHBoxLayout()
@@ -409,6 +495,9 @@ class CalendarWindow(QMainWindow):
         self.summary_quotes = _label(f"可用语录：{len(self.quotes)} 条", "muted")
         self.summary_quotes.setWordWrap(True)
         summary_layout.addWidget(self.summary_quotes)
+        self.summary_creator = _label("页脚署名：未启用", "muted")
+        self.summary_creator.setWordWrap(True)
+        summary_layout.addWidget(self.summary_creator)
         layout.addWidget(summary)
 
         layout.addWidget(_label("说明", "fieldLabel"))
@@ -416,7 +505,13 @@ class CalendarWindow(QMainWindow):
         tip.setObjectName("muted")
         tip.setWordWrap(True)
         layout.addWidget(tip)
-        layout.addStretch(1)
+        return card
+
+    def _actions_card(self) -> QWidget:
+        card = _card()
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -425,14 +520,22 @@ class CalendarWindow(QMainWindow):
         layout.addWidget(self.progress)
         self.status = _label("准备就绪 · 离线可用", "status")
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
 
-        self.sample_button = QPushButton("查看首张效果")
+        self.sample_button = QPushButton("预览本批")
         self.sample_button.clicked.connect(self._start_sample)
-        layout.addWidget(self.sample_button)
-        self.sample_status = _label("生成前可查看真实首张；预览不会保存正式批次。", "sectionHint")
+        self.sample_status = _label("预览可逐张切换；设置不变时与导出一致。", "sectionHint")
         self.sample_status.setWordWrap(True)
-        layout.addWidget(self.sample_status)
+        self.replay_button = QPushButton("从批次清单恢复…")
+        self.replay_button.clicked.connect(self._choose_replay)
+        preview_actions = QHBoxLayout()
+        preview_actions.setSpacing(10)
+        preview_actions.addWidget(self.sample_button)
+        self.reroll_button = QPushButton("重抽本批")
+        self.reroll_button.clicked.connect(self._reroll)
+        preview_actions.addWidget(self.reroll_button)
+        preview_actions.addWidget(self.sample_status, 1)
+        preview_actions.addWidget(self.replay_button)
+        layout.addLayout(preview_actions)
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
@@ -445,18 +548,30 @@ class CalendarWindow(QMainWindow):
         self.preview_button = QPushButton("预览日历")
         self.preview_button.setEnabled(False)
         self.preview_button.clicked.connect(self._open_latest_preview)
-        actions.addWidget(self.generate_button, 1)
+        actions.addWidget(self.status, 1)
+        actions.addWidget(self.generate_button)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.cancel_button)
         layout.addLayout(actions)
 
-        self.replay_button = QPushButton("从批次清单恢复…")
-        self.replay_button.clicked.connect(self._choose_replay)
-        layout.addWidget(self.replay_button)
         return card
 
     def _builtin_label(self) -> str:
         return f"一言语料 · {len(self.quotes)} 条"
+
+    def _reveal_content_editor(self, *_args: object) -> None:
+        if self.content_panel.is_manual:
+            QTimer.singleShot(0, self._scroll_to_manual_editor)
+
+    def _scroll_to_manual_editor(self) -> None:
+        if self.content_panel.is_manual:
+            self.content_panel.layout().activate()
+            self.settings_card.layout().activate()
+            self.scroll_area.widget().layout().activate()
+            editor = self.content_panel.quote_edit
+            self.scroll_area.ensureWidgetVisible(editor, 0, 16)
+            bottom = editor.mapTo(self.scroll_area.widget(), editor.rect().bottomLeft())
+            self.scroll_area.ensureVisible(bottom.x(), bottom.y(), 0, 16)
 
     def _update_fields(self, period: str) -> None:
         previous = self._current_period
@@ -541,11 +656,46 @@ class CalendarWindow(QMainWindow):
         except ValueError as exc:
             raise SettingsError("seed", "随机种子请填写整数，例如 31415；也可以留空。") from exc
 
+    @property
+    def _random_mode(self) -> bool:
+        return not self.content_panel.is_manual and self.generation_mode.currentData() == "random"
+
+    def _quantity_value(self) -> int:
+        if not self._random_mode:
+            return 1
+        try:
+            return self.quantity.value()
+        except ValueError as exc:
+            raise SettingsError("quantity", str(exc)) from exc
+
+    def _active_quote(self) -> dict[str, str] | None:
+        if self.period.currentText() == "单日" and not self.content_panel.is_manual and not self._random_mode:
+            return self._selected_quote
+        return None
+
+    def _sync_mode_ui(self) -> None:
+        if self.content_panel.is_manual:
+            with QSignalBlocker(self.generation_mode):
+                self.generation_mode.setCurrentIndex(1)
+        random_mode = self._random_mode
+        self.quantity_wrap.setVisible(random_mode)
+        self.layout_choice.set_random_mode(random_mode)
+        self.layout_wrap.findChild(QLabel, "fieldLabel").setText(
+            "版式范围（从勾选项随机）" if random_mode else "页面版式（所选版式各一张）"
+        )
+        self.mode_hint.setText(
+            "每个日期按数量出图；每张独立抽语录，仅从所选版式中随机。A+B、数量 5 = 每日期共 5 张。"
+            if random_mode else "每个日期使用同一条语录；A+B = 每日期共 2 张。单日可挑选指定语录。"
+        )
+        self.content_panel.set_selected_quote(self._selected_quote, active=self._active_quote() is not None,
+                                              random_mode=random_mode)
+
     def _check_capacity(self, count: int) -> None:
         if self.content_panel.is_manual:
             return
-        if count > len(self.quotes):
-            raise SettingsError("quotes", f"本次需要 {count} 条不重复语录，当前只有 {len(self.quotes)} 条。请缩短范围或导入更多语录。")
+        needed = count * self._quantity_value()
+        if self._active_quote() is None and needed > len(self.quotes):
+            raise SettingsError("quotes", f"本次需要 {needed} 条不重复语录，当前只有 {len(self.quotes)} 条。请减少张数、缩短范围或导入更多语录。")
 
     def _selection(self) -> tuple[list[date], str, str]:
         selected = self.period.currentText()
@@ -587,21 +737,51 @@ class CalendarWindow(QMainWindow):
 
     def _sync_controls(self) -> None:
         editable = not self.running
-        for widget in (self.period, self.start, self.end, self.layout_choice, self.seed, self.import_button, self.browse_button, self.layouts_button, self.history_button, self.default_folder_button):
+        for widget in (
+            self.period, self.start, self.end, self.layout_choice, self.seed,
+            self.quantity,
+            self.creator_checkbox, self.import_button, self.browse_button,
+            self.layouts_button, self.history_button, self.default_folder_button,
+        ):
             widget.setEnabled(editable)
+        self.generation_mode.setEnabled(editable and not self.content_panel.is_manual)
+        self.creator_input.setEnabled(editable and self.creator_checkbox.isChecked())
         self.reset_button.setEnabled(editable and self._custom_quotes)
         self.content_panel.set_state(busy=self.running, custom=self._custom_quotes)
         self.generate_button.setEnabled(editable and self._settings_valid and not self._output_error)
         self.sample_button.setEnabled(editable and self._settings_valid)
+        try:
+            fixed_seed = self._seed_value() is not None
+        except SettingsError:
+            fixed_seed = True
+        self.reroll_button.setEnabled(editable and self._settings_valid and not fixed_seed)
+        self.reroll_button.setToolTip("固定种子会复现相同结果；清空种子后可重抽。" if fixed_seed else "重新抽选整批；后续预览和导出沿用新结果。")
         self.replay_button.setEnabled(editable and not self._output_error)
         self.cancel_button.setEnabled(self.running and not self.cancel_event.is_set())
         self.preview_button.setEnabled(self.latest_output_dir is not None)
+        self.open_folder_button.setEnabled(editable and self.latest_output_dir is not None)
+        self.open_folder_button.setToolTip(
+            f"打开最近一次成功生成的批次：{self.latest_output_dir}"
+            if self.latest_output_dir is not None else
+            "生成成功后，可直接打开本次批次文件夹，查看 PNG、SVG 和网页预览。"
+        )
 
     def _refresh_summary(self, *_args: object, update_summary: bool = True) -> None:
         if self.running:
             return
+        self._sync_mode_ui()
         if update_summary:
-            self.summary_layout.setText(self.layout_choice.currentText())
+            if self._random_mode:
+                pool = self.layout_choice.selected_layouts()
+                self.summary_layout.setText(f"随机版式范围：{'、'.join(pool) if pool else '全部 A–I'}")
+            else:
+                self.summary_layout.setText(self.layout_choice.selection_text())
+            if self.creator_checkbox.isChecked() and self.creator_input.text().strip():
+                self.summary_creator.setText(f"页脚署名：{self.creator_input.text().strip()}")
+            elif self.creator_checkbox.isChecked():
+                self.summary_creator.setText("页脚署名：已启用，尚未填写")
+            else:
+                self.summary_creator.setText("页脚署名：未启用")
             if self.content_panel.is_manual:
                 content = self.content_panel.content()
                 attribution = "含出处" if content.source.strip() else "无出处"
@@ -609,32 +789,49 @@ class CalendarWindow(QMainWindow):
                 if not content.quote.strip():
                     detail = "仅出处" if content.source.strip() else "留白日历"
                 self.summary_quotes.setText(f"内容来源：单日手写（{detail}）")
+            elif self._active_quote() is not None:
+                self.summary_quotes.setText("内容来源：已选定语录（切换版式仍保留）")
             else:
                 self.summary_quotes.setText(f"可用语录：{len(self.quotes)} 条")
-        date_error = seed_error = ""
+        date_error = seed_error = quantity_error = ""
         invalid_field = ""
         try:
             days, _key, label = self._selection()
             self._check_capacity(len(days))
         except SettingsError as exc:
-            date_error, invalid_field = str(exc), exc.field
+            invalid_field = exc.field
+            if exc.field == "quantity":
+                quantity_error = str(exc)
+            else:
+                date_error = str(exc)
             if update_summary:
-                self.summary_period.setText("请检查生成范围" if exc.field == "quotes" else "请检查日期设置")
+                self.summary_period.setText("请检查生成数量" if exc.field == "quantity" else
+                                            "请检查生成范围" if exc.field == "quotes" else "请检查日期设置")
                 self.summary_pages.setText("修正标出的设置后即可生成")
         else:
             if update_summary:
                 self.summary_period.setText(label)
-                self.summary_pages.setText(f"{len(days)} 页")
+                per_day = self._quantity_value() if self._random_mode else len(self.layout_choice.selected_layouts()) or 1
+                self.summary_pages.setText(
+                    f"{len(days) * per_day} 页（{len(days)} 天 × {per_day} 张 / per Date）" if self._random_mode and per_day > 1 else
+                    f"{len(days) * per_day} 页（{len(days)} 天 × {per_day} 种版式）"
+                    if per_day > 1 else f"{len(days)} 页"
+                )
         try:
             self._seed_value()
         except SettingsError as exc:
             seed_error = str(exc)
+        creator_error = self._creator_error_message()
         self._show_error(self.date_error, date_error)
         self._show_error(self.seed_error, seed_error)
+        self._show_error(self.quantity_error, quantity_error)
+        self._show_error(self.creator_error, creator_error)
         self._show_error(self.output_error, self._output_error)
         self._mark_invalid(self.start, invalid_field == "start")
         self._mark_invalid(self.end, invalid_field == "end")
         self._mark_invalid(self.seed, bool(seed_error))
+        self._mark_invalid(self.quantity, bool(quantity_error))
+        self._mark_invalid(self.creator_input, bool(creator_error))
         self._mark_invalid(self.output_path, bool(self._output_error))
         manual_error = None
         if self.content_panel.is_manual:
@@ -648,7 +845,9 @@ class CalendarWindow(QMainWindow):
             except ManualQuoteError as exc:
                 manual_error = exc
         self.content_panel.show_error(manual_error.field if manual_error else "", str(manual_error or ""))
-        self._settings_valid = not date_error and not seed_error and manual_error is None
+        self._settings_valid = (
+            not date_error and not seed_error and not quantity_error and not creator_error and manual_error is None
+        )
         self._discard_changed_plan()
         self._sync_controls()
         if update_summary:
@@ -700,6 +899,7 @@ class CalendarWindow(QMainWindow):
         if not accepted or not preview.quotes:
             return
         self.quotes = preview.quotes
+        self._selected_quote = None
         self.corpus_label.setText(f"{Path(path).name} · {len(preview.quotes)} 条")
         self._custom_quotes = True
         self._refresh_summary()
@@ -713,9 +913,52 @@ class CalendarWindow(QMainWindow):
             QMessageBox.critical(self, "无法恢复内置语料", str(exc))
             return
         self.quotes = quotes
+        self._selected_quote = None
         self.corpus_label.setText(self._builtin_label())
         self._custom_quotes = False
         self._refresh_summary()
+
+    def _pick_quote(self) -> None:
+        if self.running or self.period.currentText() != "单日":
+            return
+        try:
+            target_date = self._date(self.start.text())
+            error = self._creator_error_message()
+            if error:
+                raise ValueError(error)
+        except ValueError as exc:
+            self._set_status(str(exc), error=True)
+            return
+        dialog = QuotePickerDialog(self.quotes, target_date, self.layout_choice.selected_layouts(),
+                                   self._effective_creator(), self)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_quote is not None:
+                self._use_selected_quote(dialog.selected_quote)
+        finally:
+            dialog.deleteLater()
+
+    def _use_selected_quote(self, quote: dict[str, str]) -> None:
+        self._selected_quote = dict(quote)
+        with QSignalBlocker(self.generation_mode):
+            self.generation_mode.setCurrentIndex(1)
+        self._refresh_summary()
+
+    def _reset_selected_quote(self) -> None:
+        if not self.running:
+            self._selected_quote = None
+            self._refresh_summary()
+
+    def _reroll(self) -> None:
+        if self.running:
+            return
+        self._refresh_summary()
+        if not self._settings_valid:
+            return
+        if self._seed_value() is not None:
+            self._set_status("固定种子会得到相同结果；清空随机种子后再重抽。")
+            return
+        self._clear_plan()
+        self._start_sample()
 
     def _choose_folder(self) -> None:
         if self.running:
@@ -758,13 +1001,19 @@ class CalendarWindow(QMainWindow):
             dialog.deleteLater()
 
     def _open_output(self) -> None:
-        path = self.output_root
+        if self.running or self.latest_output_dir is None:
+            return
+        path = self.latest_output_dir
+        if not path.is_dir():
+            QMessageBox.warning(self, "找不到生成文件夹", "最近一次成功生成的文件夹已不存在或暂时无法访问，请检查保存位置。")
+            self.latest_output_dir = None
+            self._sync_controls()
+            return
         try:
-            path.mkdir(parents=True, exist_ok=True)
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
                 raise OSError("系统未能打开该文件夹。")
         except OSError as exc:
-            QMessageBox.critical(self, "无法打开日历文件夹", str(exc))
+            QMessageBox.critical(self, "无法打开生成文件夹", str(exc))
 
     def _open_latest_preview(self) -> None:
         if self.latest_output_dir is None:
@@ -804,14 +1053,46 @@ class CalendarWindow(QMainWindow):
         self.summary_quotes.setText("使用清单中的语录与出处")
         self._start_job(lambda: prepare_replay(manifest), output_dir, "正在读取批次清单…")
 
+    def _effective_creator(self) -> str:
+        if not self.creator_checkbox.isChecked():
+            return ""
+        return self.creator_input.text().strip()
+
+    def _creator_error_message(self) -> str:
+        if not self.creator_checkbox.isChecked():
+            return ""
+        creator = self.creator_input.text().strip()
+        if len(creator) > 32:
+            return "署名最多 32 个字符，请精简后重试。"
+        invalid = INVALID_XML_TEXT.search(creator)
+        if invalid is not None:
+            return f"署名含 SVG 不支持的字符 U+{ord(invalid.group()):04X}，请删除后重试。"
+        return ""
+
+    def _on_creator_changed(self, *_args: object) -> None:
+        self.creator_input.setEnabled(not self.running and self.creator_checkbox.isChecked())
+        self._layout_images = None
+        if self.smoke_output is None:
+            try:
+                save_creator_preferences(self.creator_checkbox.isChecked(), self.creator_input.text())
+            except (OSError, ValueError) as exc:
+                self._show_error(self.settings_warning, f"无法记住署名设置；本次仍可使用。详情：{exc}")
+            else:
+                self._preferences_warning = preferences_warning()
+                self._show_error(self.settings_warning, self._preferences_warning)
+        self._refresh_summary()
+
     def _content_key(self) -> tuple:
         days, _period_key, _label_text = self._selection()
+        creator = self._effective_creator()
         if self.content_panel.is_manual:
             content = self.content_panel.content()
-            return ("manual", days[0], self.layout_choice.currentData(), self._seed_value(),
-                    content.quote.strip(), content.source.strip())
+            return ("manual", days[0], self.layout_choice.selection(), self._seed_value(),
+                    content.quote.strip(), content.source.strip(), creator)
         return (
-            "corpus", self.period.currentText(), tuple(days), self.layout_choice.currentData(), self._seed_value(),
+            "corpus", self.period.currentText(), tuple(days), self.layout_choice.selection(), self._seed_value(),
+            creator, self._random_mode, self._quantity_value(),
+            tuple(sorted(self._active_quote().items())) if self._active_quote() is not None else None,
             tuple((item["quote"], item["source"], item["quote_id"]) for item in self.quotes),
         )
 
@@ -824,13 +1105,14 @@ class CalendarWindow(QMainWindow):
             unchanged = False
         if not unchanged:
             self._clear_plan()
-            self.sample_status.setText("设置或语料已更改，请重新查看首张效果。")
+            self.sample_status.setText("设置或语料已更改，请重新预览本批。")
 
     def _clear_plan(self) -> None:
         self._prepared_plan = None
         self._plan_key = None
         self._sample_plan = None
         self._sample_image = None
+        self._sample_images = None
 
     def _plan_for_settings(self) -> GenerationPlan:
         key = self._content_key()
@@ -838,30 +1120,39 @@ class CalendarWindow(QMainWindow):
             days, _period_key, _label_text = self._selection()
             self._check_capacity(len(days))
             seed = self._seed_value()
-            choice = self.layout_choice.currentData()
-            layout = "RANDOM" if choice == "随机" else str(choice)
+            layout = self.layout_choice.selection()
             if self.content_panel.is_manual:
                 try:
-                    plan = plan_manual_page(days[0], self.content_panel.content(), layout, seed)
+                    plan = plan_manual_page(
+                        days[0], self.content_panel.content(), layout, seed,
+                        creator=self._effective_creator(),
+                    )
                 except ManualQuoteError as exc:
                     self._manual_fit_failure = (key, exc)
                     self._refresh_summary()
                     raise
             else:
-                plan = GenerationPlan(tuple(plan_pages(days, self.quotes, layout, seed)), seed)
+                options = {}
+                if self._effective_creator():
+                    options["creator"] = self._effective_creator()
+                if self._random_mode:
+                    options["pages_per_date"] = self._quantity_value()
+                if self._active_quote() is not None:
+                    options["selected_quote"] = self._active_quote()
+                pages = plan_pages(days, self.quotes, layout, seed, **options)
+                plan = GenerationPlan(tuple(pages), seed)
             self._prepared_plan = plan
             self._plan_key = key
             self._sample_image = None
+            self._sample_images = None
         return self._prepared_plan
 
     def _show_layouts(self) -> None:
         if self.running:
             return
-        dialog = LayoutChooserDialog(str(self.layout_choice.currentData()), self)
+        dialog = LayoutChooserDialog(self.layout_choice.selection(), self, random_mode=self._random_mode)
         self._layout_dialog = dialog
-        dialog.accepted.connect(lambda: self.layout_choice.setCurrentIndex(
-            self.layout_choice.findData(dialog.selected_layout),
-        ))
+        dialog.accepted.connect(lambda: self.layout_choice.set_selection(dialog.selection()))
         dialog.finished.connect(lambda _result: self._finish_layout_dialog(dialog))
         if self._layout_images is not None:
             dialog.set_images(self._layout_images)
@@ -872,12 +1163,12 @@ class CalendarWindow(QMainWindow):
                 dialog.show_error(str(exc))
         dialog.open()
 
-    @staticmethod
-    def _layout_example_pages() -> tuple[CalendarPage, ...]:
+    def _layout_example_pages(self) -> tuple[CalendarPage, ...]:
         # A genuine, unmodified record from the bundled corpus, independent of imports.
         quote = builtin_quotes()[0]
         return tuple(CalendarPage(date(2027, 1, 1), letter, letter,
-                                  quote["quote"], quote["source"], quote["quote_id"])
+                                  quote["quote"], quote["source"], quote["quote_id"],
+                                  self._effective_creator())
                      for letter in LAYOUT_LABELS)
 
     def _finish_layout_dialog(self, dialog: LayoutChooserDialog) -> None:
@@ -895,20 +1186,20 @@ class CalendarWindow(QMainWindow):
             return
         try:
             plan = self._plan_for_settings()
-            if self._sample_image is not None:
+            if self._sample_images is not None:
                 self._show_sample(plan)
                 return
             self._sample_plan = plan
-            self._start_preview_job("sample", plan.pages[:1])
+            self._start_preview_job("sample", plan.pages)
         except ManualQuoteError as exc:
             self._set_status(str(exc), error=True)
             if self.smoke_output is not None:
                 self._finish_smoke(exc)
         except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "无法预览首张", str(exc))
+            QMessageBox.warning(self, "无法预览本批", str(exc))
 
     def _show_sample(self, plan: GenerationPlan) -> None:
-        dialog = FirstPageDialog(plan.pages[0], self._sample_image, len(plan.pages), self)
+        dialog = BatchPreviewDialog(plan.pages, self._sample_images, self)
         try:
             dialog.exec()
         finally:
@@ -921,7 +1212,7 @@ class CalendarWindow(QMainWindow):
         self._sync_controls()
         self.progress.setRange(0, len(pages))
         self.progress.setValue(0)
-        self._set_status("正在准备版式示意…" if kind == "layouts" else "正在渲染首张效果…")
+        self._set_status("正在准备版式示意…" if kind == "layouts" else f"正在渲染本批 {len(pages)} 张…")
         threading.Thread(target=run_preview_job, args=(pages, self.cancel_event, self.events), daemon=True).start()
 
     def _start(self) -> None:
@@ -940,8 +1231,7 @@ class CalendarWindow(QMainWindow):
         try:
             days, period_key, label = self._selection()
             self._check_capacity(len(days))
-            layout_data = self.layout_choice.currentData()
-            layout = "RANDOM" if layout_data == "随机" else str(layout_data)
+            layout = self.layout_choice.selection()
             plan = self._plan_for_settings()
             output_dir = unique_output_dir(period_key, layout, root=self.output_root)
         except ManualQuoteError as exc:
@@ -983,7 +1273,7 @@ class CalendarWindow(QMainWindow):
                     self.progress.setValue(event.completed)
                     if self._task_kind != "generation":
                         text = (f"正在渲染版式示意 · {event.completed}/{event.total}"
-                                if self._task_kind == "layouts" else "正在渲染首张效果…")
+                                if self._task_kind == "layouts" else f"正在渲染本批 · {event.completed}/{event.total}")
                         self._set_status(text)
                         if self._task_kind == "layouts" and self._layout_dialog is not None:
                             self._layout_dialog.status.setText(text)
@@ -1011,19 +1301,21 @@ class CalendarWindow(QMainWindow):
                                 self._layout_images = event.images
                                 if self._layout_dialog is not None:
                                     self._layout_dialog.set_images(event.images)
-                                self._set_status("版式示意已就绪 · 选择后可查看真实首张")
+                                self._set_status("版式示意已就绪 · 选择后可预览本批")
                                 if self.smoke_output is not None:
                                     self._start_sample()
                             elif self._prepared_plan is self._sample_plan:
                                 self._sample_image = event.images[0][1]
-                                self.sample_status.setText("首张已就绪 · 设置不变时与正式生成一致。")
-                                self._set_status("首张效果已就绪 · 关闭预览后可生成整批")
+                                self._sample_images = event.images
+                                self.sample_status.setText(f"本批 {len(event.images)} 张已就绪 · 与正式生成一致。")
+                                self._set_status("本批预览已就绪 · 关闭预览后可生成整批")
                                 if self.smoke_output is not None:
                                     self._start()
                                 else:
                                     self._show_sample(self._prepared_plan)
                         except ValueError as exc:
                             self._sample_image = None
+                            self._sample_images = None
                             self._layout_images = None
                             QMessageBox.warning(self, "无法显示预览", str(exc))
                         continue
@@ -1036,10 +1328,11 @@ class CalendarWindow(QMainWindow):
                     self._set_status(f"已生成 {event.output_dir} · 点击“预览日历”查看")
                     if self.smoke_output is not None:
                         page = self._job_plan.pages[0]
-                        image_path = event.output_dir / "png" / f"{page.target_date.isoformat()}_layout-{page.layout}.png"
-                        if image_path.read_bytes() != self._sample_image:
-                            self._finish_smoke(ValueError("首张预览与正式生成的 PNG 不一致。"))
-                            return
+                        for page, (_layout, image) in zip(self._job_plan.pages, self._sample_images):
+                            image_path = event.output_dir / "png" / f"{page.basename}.png"
+                            if image_path.read_bytes() != image:
+                                self._finish_smoke(ValueError("本批预览与正式生成的 PNG 不一致。"))
+                                return
                         self._finish_smoke()
                         return
                     if self._job_plan is not None and self._prepared_plan is self._job_plan:
@@ -1071,15 +1364,25 @@ class CalendarWindow(QMainWindow):
             pass
 
     def _smoke(self) -> None:
+        if self.smoke_random_count is not None:
+            if (self.generation_mode.currentData() != "random" or self.quantity.value() != 1
+                    or self.layout_choice.selection() != "RANDOM"):
+                self._finish_smoke(ValueError("默认设置必须是全随机、1 张 / per Date。"))
+                return
+            self.quantity.setText(str(self.smoke_random_count))
+        else:
+            self.generation_mode.setCurrentIndex(1)
         self.period.setCurrentText("年份" if self.smoke_year else "单日")
         self.start.setText("2028" if self.smoke_year else "20270101")
-        self.layout_choice.setCurrentIndex(0 if self.smoke_year else 1)
+        self.layout_choice.set_selection("RANDOM" if self.smoke_year else "A")
         self.seed.setText("31415")
         if self.smoke_manual:
             quote = self.smoke_quote if self.smoke_quote is not None else '春风又绿江南岸\n明月 <日常> & "文字"'
             self.content_panel.quote_edit.setPlainText(quote)
             self.content_panel.selector.setCurrentIndex(1)
-            self.layout_choice.setCurrentIndex(0)
+            self.layout_choice.set_selection("RANDOM")
+        if self.smoke_layouts is not None:
+            self.layout_choice.set_selection(self.smoke_layouts)
         self.output_root = self.smoke_output or self.output_root
         self._start_preview_job("layouts", self._layout_example_pages())
 
@@ -1106,7 +1409,8 @@ class CalendarWindow(QMainWindow):
 
 
 def run(*, smoke_output: Path | None = None, smoke_year: bool = False,
-        smoke_manual: bool = False, smoke_quote: str | None = None) -> int:
+        smoke_manual: bool = False, smoke_quote: str | None = None,
+        smoke_layouts: str | None = None, smoke_random_count: int | None = None) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("每日文学日历")
     app.setWindowIcon(QIcon(str(RESOURCE_ROOT / "assets/calendar.ico")))
@@ -1117,7 +1421,8 @@ def run(*, smoke_output: Path | None = None, smoke_year: bool = False,
     window: CalendarWindow | None = None
     try:
         window = CalendarWindow(smoke_output=smoke_output, smoke_year=smoke_year,
-                                smoke_manual=smoke_manual, smoke_quote=smoke_quote)
+                                smoke_manual=smoke_manual, smoke_quote=smoke_quote,
+                                smoke_layouts=smoke_layouts, smoke_random_count=smoke_random_count)
         window.show()
     except (OSError, ValueError, RuntimeError) as exc:
         if smoke_output is not None:

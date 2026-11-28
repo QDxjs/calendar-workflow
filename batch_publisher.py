@@ -20,7 +20,7 @@ class BatchWriterDependencies:
     app_version: str
     manifest_fields: Sequence[str]
     renderers: Mapping[str, Callable[[dict[str, object]], str]]
-    metadata: Callable[[object, str, str, str], dict[str, object]]
+    metadata: Callable[..., dict[str, object]]
     rasterize: Callable[[Path, Path], None]
     validate_pages: Callable[[list[CalendarPage]], None]
     validate_rendering: Callable[..., None]
@@ -74,9 +74,9 @@ def write_batch(
                     print(progress, flush=True)
                 try:
                     day_metadata = dependencies.metadata(
-                        page.target_date, page.layout, page.quote, page.source,
+                        page.target_date, page.layout, page.quote, page.source, page.creator,
                     )
-                    basename = f"{page.target_date.isoformat()}_layout-{page.layout}"
+                    basename = page.basename
                     svg_path = svg_dir / f"{basename}.svg"
                     png_path = png_dir / f"{basename}.png"
                     svg_path.write_text(dependencies.renderers[page.layout](day_metadata), encoding="utf-8")
@@ -91,6 +91,8 @@ def write_batch(
                         "quote": page.quote,
                         "source": page.source,
                         "quote_id": page.quote_id,
+                        "creator": page.creator,
+                        "variant": page.variant or "",
                         "seed": "" if seed is None else seed,
                         "app_version": dependencies.app_version,
                         "python_version": platform.python_version(),

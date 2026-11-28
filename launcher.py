@@ -11,6 +11,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from generate import APP_VERSION, CalendarPage, LAYOUT_LABELS, RENDERERS, write_batch
+from layout_selection import resolve_layouts
 from periods import dates_between, dates_in_iso_week, dates_in_month, dates_in_year
 from quote_library import builtin_quotes, load_quotes
 
@@ -178,25 +179,54 @@ def unique_output_dir(period_key: str, layout_selection: str | None, *, root: Pa
 def plan_pages(
     dates: list[date], quotes: list[dict[str, str]],
     layout_selection: str, seed: int | None = None,
+    *, creator: str = "", pages_per_date: int | None = None,
+    selected_quote: dict[str, str] | None = None,
 ) -> list[CalendarPage]:
-    if len(quotes) < len(dates):
-        raise ValueError(f"可用的不重复语录只有 {len(quotes)} 条，少于本次需要的 {len(dates)} 条。")
+    explicit_layouts = resolve_layouts(layout_selection, RENDERERS)
+    if pages_per_date is not None and (type(pages_per_date) is not int or pages_per_date < 1):
+        raise ValueError("数量必须是正整数（张 / per Date）。")
+    if selected_quote is not None and (len(dates) != 1 or pages_per_date is not None):
+        raise ValueError("选定语录仅支持单日的同语录换版式模式。")
+    needed = len(dates) * (pages_per_date or 1)
+    if selected_quote is None and len(quotes) < needed:
+        raise ValueError(f"可用的不重复语录只有 {len(quotes)} 条，少于本次需要的 {needed} 条。")
 
     rng = random.Random(seed)
-    selected_quotes = rng.sample(quotes, k=len(dates))
-    if layout_selection == "RANDOM":
-        layouts: list[str] = []
-        previous_layout: str | None = None
-        for _ in dates:
-            candidates = [layout for layout in RENDERERS if layout != previous_layout]
-            previous_layout = rng.choice(candidates or list(RENDERERS))
-            layouts.append(previous_layout)
-    else:
-        layouts = [layout_selection] * len(dates)
-
-    selection_label = "random" if layout_selection == "RANDOM" else layout_selection
+    selected_quotes = [selected_quote] if selected_quote is not None else rng.sample(quotes, k=needed)
+    clean_creator = creator.strip()
+    if pages_per_date is not None:
+        pool = explicit_layouts or tuple(RENDERERS)
+        pages: list[CalendarPage] = []
+        previous_layout = None
+        for index, quote in enumerate(selected_quotes):
+            candidates = [layout for layout in pool if layout != previous_layout]
+            previous_layout = rng.choice(candidates or list(pool))
+            pages.append(CalendarPage(
+                dates[index // pages_per_date], "random", previous_layout,
+                quote["quote"], quote["source"], quote["quote_id"], clean_creator,
+                index % pages_per_date + 1 if pages_per_date > 1 else 0,
+            ))
+        return pages
+    if explicit_layouts:
+        return [
+            CalendarPage(
+                target_date, layout, layout, quote["quote"], quote["source"],
+                quote["quote_id"], clean_creator,
+            )
+            for target_date, quote in zip(dates, selected_quotes)
+            for layout in explicit_layouts
+        ]
+    layouts: list[str] = []
+    previous_layout: str | None = None
+    for _ in dates:
+        candidates = [layout for layout in RENDERERS if layout != previous_layout]
+        previous_layout = rng.choice(candidates or list(RENDERERS))
+        layouts.append(previous_layout)
     return [
-        CalendarPage(target_date, selection_label, layout, quote["quote"], quote["source"], quote["quote_id"])
+        CalendarPage(
+            target_date, "random", layout, quote["quote"], quote["source"],
+            quote["quote_id"], clean_creator,
+        )
         for target_date, quote, layout in zip(dates, selected_quotes, layouts)
     ]
 

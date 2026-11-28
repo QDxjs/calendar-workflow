@@ -16,6 +16,7 @@ def prepare_pages(
     input_path: Path,
     *,
     seed: int | None = None,
+    creator: str = "",
     renderers: Mapping[str, object],
     validate: Callable[[list[CalendarPage]], None],
 ) -> list[CalendarPage]:
@@ -41,7 +42,10 @@ def prepare_pages(
             raise ValueError(f"第 {index + 2} 行版式应为 A–I、R 或 auto，收到：{requested!r}")
 
         source = (row.get("source") or "").strip()
-        pages.append(CalendarPage(target_date, selection_label, selected, quote, source))
+        row_creator = (row.get("creator") or creator).strip()
+        pages.append(CalendarPage(
+            target_date, selection_label, selected, quote, source, creator=row_creator,
+        ))
         previous_layout = selected
 
     validate(pages)
@@ -109,7 +113,14 @@ def prepare_replay_with_details(
             seed = recorded_seed
         elif recorded_seed != seed:
             raise ValueError(f"清单第 {record_number} 条记录的随机种子与首条记录不一致。")
-        pages.append(CalendarPage(target_date, selection, layout, row["quote"], row["source"], row["quote_id"]))
+        creator = (row.get("creator") or "").strip()
+        raw_variant = (row.get("variant") or "").strip()
+        if raw_variant and not re.fullmatch(r"[1-9][0-9]*", raw_variant):
+            raise ValueError(f"清单第 {record_number} 条记录的页序号必须为正整数或留空。")
+        pages.append(CalendarPage(
+            target_date, selection, layout, row["quote"], row["source"], row["quote_id"], creator,
+            int(raw_variant) if raw_variant else 0,
+        ))
 
     validate(pages)
     return ReplayDetails(tuple(pages), seed, tuple(sorted(versions)))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from svg_primitives import (
-    BRAND, CLAY, INK, LATIN, PAPER, SANS, line, quote_block, rect, svg_open, text,
+    CLAY, INK, LATIN, PAPER, SANS, footer_brand, line, quote_block, rect, svg_open, text,
 )
 
 
@@ -50,7 +50,7 @@ def render_e(m: dict[str, object]) -> str:
     ]
     p.append(quote_block(str(m["quote"]), str(m["source"]), x=561, y=860,
                          width=770, max_height=330, font_size=46, max_lines=5,
-                         rule_color=CLAY))
+                         rule_color=CLAY, top=610, bottom=1142))
     p += [rect(42, 1200, 1038, 160, "none", INK, 1.2),
           rect(42, 1200, 146, 160, INK, INK, 0),
           rect(934, 1200, 146, 160, INK, INK, 0),
@@ -59,7 +59,9 @@ def render_e(m: dict[str, object]) -> str:
                family=SANS, spacing=0.6),
           text(115, 1316, "OF THE YEAR", 9.5, fill=PAPER, family=SANS, spacing=0.4),
           line(235, 1280, 320, 1280),
-          text(577, 1288, BRAND, 15, family=LATIN, spacing=0.2, max_width=500),
+          footer_brand(577, 1272 if m.get("creator") else 1288, str(m.get("creator", "")),
+                       brand_size=15, brand_spacing=0.2, brand_italic=False, max_width=500,
+                       creator_y=1304, creator_size=12, creator_max_width=500),
           line(835, 1280, 900, 1280),
           text(1007, 1264, "FILED", 11, fill=PAPER, family=SANS, spacing=1.0),
           text(1007, 1290, "BY DATE", 11, fill=PAPER, family=SANS, spacing=0.8),

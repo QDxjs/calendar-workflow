@@ -33,7 +33,7 @@ def run_preview_job(
                 validate_rendering([page], check_cancel=check_cancel)
                 svg_path, png_path = root / "page.svg", root / "page.png"
                 svg_path.write_text(RENDERERS[page.layout](metadata(
-                    page.target_date, page.layout, page.quote, page.source,
+                    page.target_date, page.layout, page.quote, page.source, page.creator,
                 )), encoding="utf-8")
                 svg_to_png(svg_path, png_path)
                 check_cancel()

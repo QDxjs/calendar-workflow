@@ -68,3 +68,12 @@ class PreferencesTests(unittest.TestCase):
             self.settings.write_text(json.dumps({"output_directory": invalid}))
             self.assertEqual(preferences.load_output_directory(self.root), self.root)
             self.assertTrue(preferences.preferences_warning())
+
+    def test_creator_preferences_default_empty_unchecked_and_persist_atomically(self):
+        self.assertEqual(preferences.load_creator_preferences(), (False, ""))
+        preferences.save_creator_preferences(True, "小林 · 2027")
+        self.assertEqual(preferences.load_creator_preferences(), (True, "小林 · 2027"))
+        preferences.save_creator_preferences(False, "小林 · 2027")
+        self.assertEqual(preferences.load_creator_preferences(), (False, "小林 · 2027"))
+        preferences.save_output_directory(self.root / "out")
+        self.assertEqual(preferences.load_creator_preferences(), (False, "小林 · 2027"))

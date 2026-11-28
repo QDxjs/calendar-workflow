@@ -50,13 +50,35 @@ def save_output_directory(directory: Path | None) -> None:
     """Persist an explicit directory, or clear it to follow the running app."""
     if directory is not None and not directory.is_absolute():
         raise ValueError("输出目录必须是绝对路径。")
-    target = preferences_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
     stored, _warning = _read_settings()
     if directory is None:
         stored.pop("output_directory", None)
     else:
         stored["output_directory"] = str(directory)
+    _write_settings(stored)
+
+
+def load_creator_preferences() -> tuple[bool, str]:
+    """Return (enabled, creator_text), defaulting to (False, '')."""
+    stored, _warning = _read_settings()
+    raw_enabled = stored.get("creator_enabled")
+    enabled = raw_enabled if isinstance(raw_enabled, bool) else False
+    raw_text = stored.get("creator_text")
+    creator_text = raw_text if isinstance(raw_text, str) else ""
+    return enabled, creator_text
+
+
+def save_creator_preferences(enabled: bool, creator_text: str) -> None:
+    """Persist creator checkbox state and default creator text atomically."""
+    stored, _warning = _read_settings()
+    stored["creator_enabled"] = bool(enabled)
+    stored["creator_text"] = creator_text
+    _write_settings(stored)
+
+
+def _write_settings(stored: dict) -> None:
+    target = preferences_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
     contents = json.dumps(stored, ensure_ascii=False, indent=2) + "\n"
     temporary = None
     try:

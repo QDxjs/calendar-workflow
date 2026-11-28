@@ -14,6 +14,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 import xml.etree.ElementTree as ET
 
 from calendar_models import BatchCancelled
@@ -201,6 +202,8 @@ def verify_portable(*, full_year: bool) -> int:
             count = verify_output(output, full_year=full_year)
             verify_replay(output, scratch_root)
             verify_manual_workflow(scratch_root)
+            verify_multilayout_workflow(scratch_root)
+            verify_random_workflow(scratch_root)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, ET.ParseError, csv.Error) as exc:
         print(f"Portable acceptance failed: {exc}", file=sys.stderr)
         return 1
@@ -209,7 +212,82 @@ def verify_portable(*, full_year: bool) -> int:
     print("Sample manifest replay, cancellation cleanup and retry passed.", flush=True)
     print("History discovery, manifest summary and independent cancellation passed.", flush=True)
     print("Manual desktop preview/export consistency, blank/source-only nine-layout output and lossless replay passed.", flush=True)
+    print("Multiple-layout desktop corpus/manual exports, same-day quotes and screenshot regression passed.", flush=True)
+    print("Fully random defaults, per-date quantity, all-page preview/export and searchable quotation picker passed.", flush=True)
     return 0
+
+
+def verify_multilayout_workflow(scratch: Path) -> None:
+    from desktop import run
+    from launcher import plan_pages
+
+    for manual in (False, True):
+        output = scratch / f"multi-layout-desktop-{int(manual)}"
+        require(run(smoke_output=output, smoke_manual=manual, smoke_layouts="A+C+F") == 0,
+                "Multiple-layout desktop preview/export failed.")
+        batches = list(scan_history(output))
+        require(len(batches) == 1 and batches[0].status == "文件齐全", "Multiple-layout history is incomplete.")
+        pages = list(batches[0].pages)
+        require([page.layout for page in pages] == ["A", "C", "F"], "Selected layouts were skipped or reordered.")
+        require(len({(page.target_date, page.quote, page.source, page.quote_id) for page in pages}) == 1,
+                "Same-day layouts did not share their quote and attribution.")
+        for page in pages:
+            validate_png(batches[0].directory / "png" / f"{page.target_date}_layout-{page.layout}.png")
+    quote = next(item for item in builtin_quotes() if item["quote"].startswith("我们不能轻易将"))
+    pages = plan_pages([date(2026, 11, 28)], [quote], "+".join(LAYOUT_LABELS), 17)
+    batch = scratch / "screenshot-nine-layouts"
+    write_batch(pages, batch, seed=17, on_progress=lambda *_: None)
+    require(prepare_replay(batch / "manifest.csv") == (pages, 17), "Multiple-layout screenshot replay differs.")
+    for page in pages:
+        validate_png(batch / "png" / f"{page.target_date}_layout-{page.layout}.png")
+
+
+def verify_random_workflow(scratch: Path) -> None:
+    from PySide6.QtWidgets import QApplication
+    from desktop import run
+    from launcher import plan_pages
+    from quote_picker_dialog import QuotePickerDialog
+    from quote_selection import QuoteSearch
+
+    output = scratch / "random-five-desktop"
+    require(run(smoke_output=output, smoke_random_count=5, smoke_layouts="A") == 0,
+            "Random per-date desktop workflow failed.")
+    history = list(scan_history(output))
+    require(len(history) == 1 and history[0].status == "文件齐全", "Random output history differs.")
+    batch = history[0]
+    require(len(batch.pages) == 5 and [page.variant for page in batch.pages] == [1, 2, 3, 4, 5],
+            "Random per-date page count or ordinal differs.")
+    require(len({page.quote for page in batch.pages}) == 5 and all(page.layout == "A" for page in batch.pages),
+            "Random pool or distinct quotation contract differs.")
+    gallery = (batch.directory / "index.html").read_text(encoding="utf-8")
+    for page in batch.pages:
+        validate_png(batch.directory / "png" / f"{page.basename}.png")
+        require(f"png/{page.basename}.png" in gallery, "Random variant gallery link is missing.")
+    pages, seed = prepare_replay(batch.directory / "manifest.csv")
+    require(tuple(pages) == batch.pages and seed == batch.seed, "Random variant replay differs.")
+    quotes = builtin_quotes()
+    dialog = QuotePickerDialog(quotes, date(2026, 11, 27), ("A", "B"), "", None)
+    try:
+        require(len(dialog.records) == 5, "Default quotation recommendations must contain five candidates.")
+        dialog.query.setText("苏轼 明月")
+        dialog.show()
+        deadline = time.monotonic() + 15
+        while not dialog.use_button.isEnabled() and time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.02)
+        require(dialog.use_button.isEnabled(), f"Quotation picker preview failed: {dialog.preview_status.text()}")
+        require(dialog.records == QuoteSearch(quotes).search("苏轼 明月"), "Quotation search scope differs.")
+        record = dict(dialog.records[dialog.list.currentRow()])
+        dialog.use_button.click()
+        require(dialog.selected_quote == record, "Quotation confirmation changed the original record.")
+        chosen = plan_pages([date(2026, 11, 27)], quotes, "A+B", selected_quote=record)
+        require(len(chosen) == 2 and all(page.quote_id == record["quote_id"] and page.quote == record["quote"]
+                                        and page.source == record["source"] for page in chosen),
+                "Chosen quotation was not preserved across layouts.")
+    finally:
+        dialog.reject()
+        dialog.deleteLater()
+        QApplication.processEvents()
 
 
 def verify_manual_workflow(scratch: Path) -> None:

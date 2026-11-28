@@ -36,7 +36,7 @@ from svg_primitives import (
 )
 from svg_validation import validate_rendering as _validate_rendering
 
-APP_VERSION = "0.6.2"
+APP_VERSION = "0.6.8"
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 APP_ROOT = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
             else Path(__file__).resolve().parent)
@@ -73,7 +73,7 @@ LAYOUT_LABELS = {
 
 MANIFEST_FIELDS = [
     "date", "iso_week_year", "iso_week", "iso_week_label",
-    "layout_selection", "layout", "quote", "source", "quote_id", "seed",
+    "layout_selection", "layout", "quote", "source", "quote_id", "creator", "variant", "seed",
     "app_version", "python_version",
 ]
 def validate_pages(pages: list[CalendarPage]) -> None:
@@ -108,8 +108,13 @@ def write_batch(
         dependencies=dependencies,
     )
 
-def prepare_pages(input_path: Path, *, seed: int | None = None) -> list[CalendarPage]:
-    return _prepare_pages(input_path, seed=seed, renderers=RENDERERS, validate=validate_pages)
+def prepare_pages(
+    input_path: Path, *, seed: int | None = None, creator: str = "",
+) -> list[CalendarPage]:
+    return _prepare_pages(
+        input_path, seed=seed, creator=creator,
+        renderers=RENDERERS, validate=validate_pages,
+    )
 
 
 def prepare_replay(manifest_path: Path) -> tuple[list[CalendarPage], int | None]:

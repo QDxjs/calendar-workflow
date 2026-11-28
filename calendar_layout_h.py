@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from svg_primitives import BRAND, LATIN, MID, PALE, SANS, line, quote_block, rect, svg_open, text
+from svg_primitives import LATIN, MID, PALE, SANS, footer_brand, line, quote_block, rect, svg_open, text
 
 
 def render_h(m: dict[str, object]) -> str:
@@ -34,7 +34,10 @@ def render_h(m: dict[str, object]) -> str:
           text(561, 802, "A THOUGHT FOR TODAY", 10, family=SANS, spacing=1.1)]
     p.append(quote_block(str(m["quote"]), str(m["source"]), x=561, y=980,
                          width=830, max_height=380, font_size=44, max_lines=4,
-                         rule_color=MID))
+                         rule_color=MID, top=834, bottom=1164))
     p += [line(92, 1218, 1030, 1218, 0.8, MID),
-          text(561, 1306, BRAND, 13, family=LATIN, italic=True), "</svg>"]
+          footer_brand(561, 1296 if m.get("creator") else 1306, str(m.get("creator", "")),
+                       brand_size=13, brand_spacing=0, max_width=780,
+                       creator_y=1324, creator_size=11.5, creator_max_width=780),
+          "</svg>"]
     return "\n".join(p)

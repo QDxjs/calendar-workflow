@@ -11,7 +11,9 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QApplication, QBoxLayout
 
 import desktop
 from calendar_models import (
@@ -104,7 +106,7 @@ class DesktopTests(unittest.TestCase):
         with patch("desktop.threading.Thread") as worker:
             window._start()
         self.assertTrue(window.running)
-        for name in ("period", "start", "end", "layout_choice", "seed", "import_button", "reset_button", "browse_button", "generate_button", "replay_button", "sample_button", "layouts_button"):
+        for name in ("period", "start", "end", "layout_choice", "seed", "creator_checkbox", "creator_input", "import_button", "reset_button", "browse_button", "generate_button", "replay_button", "sample_button", "layouts_button"):
             with self.subTest(control=name):
                 self.assertFalse(getattr(window, name).isEnabled())
         prepare = worker.call_args.kwargs["args"][0]
@@ -192,7 +194,7 @@ class DesktopTests(unittest.TestCase):
                     window._start_sample()
                 plan = window._prepared_plan
                 args = worker.call_args.kwargs["args"]
-                self.assertEqual(args[0], plan.pages[:1])
+                self.assertEqual(args[0], plan.pages)
                 self.assertFalse(window.generate_button.isEnabled())
                 self.assertFalse(window.sample_button.isEnabled())
                 worker.call_args.kwargs["target"](*args)
@@ -229,7 +231,8 @@ class DesktopTests(unittest.TestCase):
         changes = (
             lambda: window.start.setText("20270116"),
             lambda: window.seed.setText("31415"),
-            lambda: window.layout_choice.setCurrentIndex(2),
+            lambda: window.layout_choice.set_selection("B"),
+            lambda: (window.creator_checkbox.setChecked(True), window.creator_input.setText("林间书房")),
             lambda: setattr(window, "quotes", window.quotes[1:]),
             lambda: window.start.setText("invalid"),
         )
@@ -281,7 +284,7 @@ class DesktopTests(unittest.TestCase):
             window._show_layouts()
         dialog = window._layout_dialog
         self.assertTrue(window.running)
-        dialog._select("随机")
+        dialog.random_button.click()
         self.assertTrue(window.cancel_event.is_set())
         self.assertTrue(window.running)
         self.assertIsNone(window._layout_dialog)
@@ -294,9 +297,77 @@ class DesktopTests(unittest.TestCase):
         # Model a ready chooser without performing another real renderer run.
         window.events.put(GenerationCancelled())
         window._poll()
-        dialog._select("I")
-        self.assertEqual(window.layout_choice.currentData(), "I")
+        dialog._toggle_layout("I", True)
+        dialog.accept()
+        self.assertEqual(window.layout_choice.selection(), "I")
         self.assertIn("I", window.summary_layout.text())
+
+    def test_multi_layout_preview_export_and_history_share_each_days_quote(self):
+        from batch_history import inspect_batch
+        from generate import validate_png
+
+        window = self.window
+        window.generation_mode.setCurrentIndex(1)
+        window.layout_choice.set_selection("F+A+C")
+        window.period.setCurrentText("日期范围")
+        window.end.setText("20270116")
+        window.quotes = window.quotes[:2]
+        window._refresh_summary()
+        self.assertEqual(window.summary_pages.text(), "6 页（2 天 × 3 种版式）")
+        self.assertIn("A、C、F", window.summary_layout.text())
+        for manual in (False, True):
+            if manual:
+                window.period.setCurrentText("单日")
+                self._manual(source="原样出处")
+            with patch("desktop.threading.Thread") as previewer:
+                window._start_sample()
+            plan = window._prepared_plan
+            previewer.call_args.kwargs["target"](*previewer.call_args.kwargs["args"])
+            with patch.object(window, "_show_sample"):
+                window._poll()
+            image = window._sample_image
+            with patch("desktop.threading.Thread") as exporter:
+                window._start()
+            args = exporter.call_args.kwargs["args"]
+            self.assertIn("_layout-A+C+F_", args[1].name)
+            for checkbox in window.layout_choice.checkboxes.values():
+                self.assertFalse(checkbox.isEnabled())
+            exporter.call_args.kwargs["target"](*args)
+            window._poll()
+            batch = window.latest_output_dir
+            self.assertEqual(desktop.prepare_replay(batch / "manifest.csv"), (list(plan.pages), plan.seed))
+            self.assertEqual(inspect_batch(batch).pages, plan.pages)
+            first = plan.pages[0]
+            self.assertEqual((batch / "png" / f"{first.target_date}_layout-A.png").read_bytes(), image)
+            self.assertEqual(len(list((batch / "png").glob("*.png"))), 3 if manual else 6)
+            for page in plan.pages:
+                validate_png(batch / "png" / f"{page.target_date}_layout-{page.layout}.png")
+            for offset in range(0, len(plan.pages), 3):
+                variants = plan.pages[offset:offset + 3]
+                self.assertEqual([page.layout for page in variants], ["A", "C", "F"])
+                self.assertEqual(len({(page.target_date, page.quote, page.source, page.quote_id) for page in variants}), 1)
+
+    def test_layout_dialog_multi_select_is_applied_only_after_confirmation(self):
+        window = self.window
+        window.layout_choice.set_selection("A+C")
+        with patch("desktop.threading.Thread"):
+            window._show_layouts()
+        dialog = window._layout_dialog
+        self.assertEqual(dialog.selected_layouts, {"A", "C"})
+        dialog._toggle_layout("F", True)
+        self.assertEqual(window.layout_choice.selection(), "A+C")
+        dialog.reject()
+        window.events.put(GenerationCancelled())
+        window._poll()
+        self.assertEqual(window.layout_choice.selection(), "A+C")
+        with patch("desktop.threading.Thread"):
+            window._show_layouts()
+        dialog = window._layout_dialog
+        dialog._toggle_layout("F", True)
+        dialog.apply_button.click()
+        window.events.put(GenerationCancelled())
+        window._poll()
+        self.assertEqual(window.layout_choice.selection(), "A+C+F")
 
     def test_success_finishes_plan_but_retry_reuses_it_and_seed_reproduces(self) -> None:
         window = self.window
@@ -304,8 +375,8 @@ class DesktopTests(unittest.TestCase):
         window.end.setText("20270117")
         actual_planner = desktop.plan_pages
         # Controlled random outcomes prove replanning without a probabilistic assertion.
-        def controlled_planner(days, quotes, layout, seed):
-            return actual_planner(days, quotes, layout, planner.call_count if seed is None else seed)
+        def controlled_planner(days, quotes, layout, seed, **options):
+            return actual_planner(days, quotes, layout, planner.call_count if seed is None else seed, **options)
         with patch("desktop.plan_pages", side_effect=controlled_planner) as planner:
             first = window._plan_for_settings()
             window._sample_image = b"preview for first batch"
@@ -575,6 +646,188 @@ class DesktopTests(unittest.TestCase):
                 self.assertIs(window._plan_for_settings(), plan)
                 for widget in (panel.quote_edit, panel.source_edit, panel.selector, panel.clear_button):
                     self.assertTrue(widget.isEnabled())
+
+    def test_creator_defaults_memory_and_period_granularity(self) -> None:
+        window = self.window
+        self.assertFalse(window.creator_checkbox.isChecked())
+        self.assertEqual(window.creator_input.text(), "")
+        self.assertFalse(window.creator_input.isEnabled())
+
+        window.creator_checkbox.setChecked(True)
+        self.assertTrue(window.creator_input.isEnabled())
+        window.creator_input.setText("小林 · 手作日历")
+        window.period.setCurrentText("一周")
+        plan = window._plan_for_settings()
+        self.assertEqual(len(plan.pages), 7)
+        self.assertTrue(all(page.creator == "小林 · 手作日历" for page in plan.pages))
+        window.period.setCurrentText("年份")
+        window.start.setText("2028")
+        year_plan = window._plan_for_settings()
+        self.assertEqual(len(year_plan.pages), 366)
+        self.assertTrue(all(page.creator == "小林 · 手作日历" for page in year_plan.pages))
+
+        with patch("desktop.load_output_directory", return_value=self.root / "output"):
+            reopened = desktop.CalendarWindow()
+        try:
+            self.assertTrue(reopened.creator_checkbox.isChecked())
+            self.assertEqual(reopened.creator_input.text(), "小林 · 手作日历")
+            reopened.creator_checkbox.setChecked(False)
+            self.assertFalse(reopened.creator_input.isEnabled())
+            self.assertEqual(reopened._effective_creator(), "")
+            unplanned = reopened._plan_for_settings()
+            self.assertEqual(unplanned.pages[0].creator, "")
+        finally:
+            reopened.poll_timer.stop()
+            reopened.close()
+            reopened.deleteLater()
+
+        with patch("desktop.load_output_directory", return_value=self.root / "output"):
+            reopened_again = desktop.CalendarWindow()
+        try:
+            self.assertFalse(reopened_again.creator_checkbox.isChecked())
+            self.assertEqual(reopened_again.creator_input.text(), "小林 · 手作日历")
+        finally:
+            reopened_again.poll_timer.stop()
+            reopened_again.close()
+            reopened_again.deleteLater()
+
+    def test_creator_validation_and_unavailable_preference_storage(self) -> None:
+        window = self.window
+        window.creator_checkbox.setChecked(True)
+        window.creator_input.setText("林间书房" * 9)
+        self.assertIn("最多 32 个字符", window.creator_error.text())
+        self.assertFalse(window.generate_button.isEnabled())
+
+        window.creator_input.setText("林间书房")
+        self.assertTrue(window.generate_button.isEnabled())
+        with patch("desktop.save_creator_preferences", side_effect=OSError("read only")):
+            window.creator_input.setText("林间书房工作室")
+        self.assertIn("无法记住署名设置", window.settings_warning.text())
+        self.assertEqual(window._effective_creator(), "林间书房工作室")
+        self.assertTrue(window.generate_button.isEnabled())
+
+    def test_responsive_layout_keeps_actions_visible_and_all_settings_reachable(self):
+        window = self.window
+        window.show()
+        for width, height in ((1180, 900), (1040, 700), (720, 600)):
+            for manual in (False, True):
+                with self.subTest(size=(width, height), manual=manual):
+                    window.resize(width, height)
+                    window.content_panel.selector.setCurrentIndex(int(manual))
+                    for _iteration in range(3):
+                        self.app.processEvents()
+                    viewport = window.scroll_area.viewport()
+                    expected = (QBoxLayout.Direction.LeftToRight if width >= 1000
+                                else QBoxLayout.Direction.TopToBottom)
+                    self.assertEqual(window.body_layout.direction(), expected)
+                    self.assertEqual(window.scroll_area.horizontalScrollBar().maximum(), 0)
+                    for button in (window.sample_button, window.generate_button,
+                                   window.preview_button, window.cancel_button,
+                                   window.replay_button):
+                        self.assertTrue(button.isVisible())
+                        top_left = button.mapTo(window.centralWidget(), QPoint())
+                        self.assertGreaterEqual(top_left.x(), 0)
+                        self.assertGreaterEqual(top_left.y(), 0)
+                        self.assertLessEqual(top_left.x() + button.width(),
+                                             window.centralWidget().width())
+                        self.assertLessEqual(top_left.y() + button.height(),
+                                             window.centralWidget().height())
+                    window.scroll_area.ensureWidgetVisible(window.default_folder_button)
+                    self.app.processEvents()
+                    bottom = window.default_folder_button.mapTo(viewport, QPoint()).y()
+                    self.assertGreaterEqual(bottom, 0)
+                    self.assertLessEqual(bottom + window.default_folder_button.height(),
+                                         viewport.height())
+
+    def test_wheel_over_closed_dropdown_scrolls_settings_without_changing_selection(self):
+        window = self.window
+        window.resize(720, 600)
+        window.show()
+        for _iteration in range(3):
+            self.app.processEvents()
+        scrollbar = window.scroll_area.verticalScrollBar()
+        scrollbar.setValue(0)
+        combo = window.period
+        original = combo.currentIndex()
+        combo.setFocus()
+        position = combo.rect().center()
+        event = QWheelEvent(
+            QPointF(position), QPointF(combo.mapToGlobal(position)), QPoint(),
+            QPoint(0, -120), Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase, False,
+        )
+        QApplication.sendEvent(combo, event)
+        self.assertEqual(combo.currentIndex(), original)
+        self.assertGreater(scrollbar.value(), 0)
+
+    def test_switching_to_manual_reveals_editor_in_short_window(self):
+        window = self.window
+        window.resize(720, 600)
+        window.show()
+        self.app.processEvents()
+        window.content_panel.selector.setCurrentIndex(1)
+        for _iteration in range(3):
+            self.app.processEvents()
+        editor = window.content_panel.quote_edit
+        viewport = window.scroll_area.viewport()
+        position = editor.mapTo(viewport, QPoint())
+        self.assertGreaterEqual(position.y(), 0)
+        self.assertLessEqual(position.y() + editor.height(), viewport.height())
+
+
+    def test_open_folder_is_unavailable_until_a_batch_succeeds(self):
+        window = self.window
+        self.assertFalse(window.open_folder_button.isEnabled())
+        with patch("desktop.QDesktopServices.openUrl") as opener:
+            window._open_output()
+        opener.assert_not_called()
+        self.assertFalse(window.output_root.exists())
+
+    def test_open_folder_tracks_latest_successful_batch_instead_of_output_root(self):
+        window = self.window
+        for name in ("first batch", "second batch"):
+            batch = self.root / name
+            batch.mkdir()
+            window.events.put(GenerationCompleted(batch))
+            window._poll()
+            self.assertTrue(window.open_folder_button.isEnabled())
+            self.assertIn(str(batch), window.open_folder_button.toolTip())
+            window.output_root = self.root / "different output root"
+            with patch("desktop.QDesktopServices.openUrl", return_value=True) as opener:
+                window.open_folder_button.click()
+            opener.assert_called_once_with(desktop.QUrl.fromLocalFile(str(batch)))
+
+    def test_failed_or_cancelled_generation_keeps_previous_successful_folder(self):
+        window = self.window
+        previous = self.root / "previous successful batch"
+        previous.mkdir()
+        window.latest_output_dir = previous
+        for event in (GenerationCancelled(), GenerationFailed(RuntimeError("render failed"))):
+            with self.subTest(event=type(event).__name__):
+                with patch("desktop.threading.Thread"):
+                    window._start()
+                self.assertFalse(window.open_folder_button.isEnabled())
+                window.events.put(event)
+                with patch("desktop.QMessageBox.critical"):
+                    window._poll()
+                self.assertTrue(window.open_folder_button.isEnabled())
+                with patch("desktop.QDesktopServices.openUrl", return_value=True) as opener:
+                    window.open_folder_button.click()
+                opener.assert_called_once_with(desktop.QUrl.fromLocalFile(str(previous)))
+
+    def test_missing_generated_folder_is_not_recreated_or_replaced_with_output_root(self):
+        window = self.window
+        missing = self.root / "removed batch"
+        window.latest_output_dir = missing
+        window._sync_controls()
+        with patch("desktop.QDesktopServices.openUrl") as opener, patch("desktop.QMessageBox.warning") as warning:
+            window.open_folder_button.click()
+        warning.assert_called_once()
+        opener.assert_not_called()
+        self.assertFalse(missing.exists())
+        self.assertFalse(window.output_root.exists())
+        self.assertIsNone(window.latest_output_dir)
+        self.assertFalse(window.open_folder_button.isEnabled())
 
 
 if __name__ == "__main__":

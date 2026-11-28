@@ -19,6 +19,13 @@ class CalendarPage:
     quote: str
     source: str
     quote_id: str = ""
+    creator: str = ""
+    variant: int = 0
+
+    @property
+    def basename(self) -> str:
+        suffix = f"_{self.variant:03d}" if self.variant else ""
+        return f"{self.target_date.isoformat()}{suffix}_layout-{self.layout}"
 
     @property
     def weekday(self) -> str:

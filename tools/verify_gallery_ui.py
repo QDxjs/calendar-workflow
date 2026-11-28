@@ -167,7 +167,42 @@ def main():
             view.grab().save(str(args.screenshots / 'gallery-lightbox.png'))
         if interceptor.remote:
             raise AssertionError('Gallery attempted network access.')
-        print('Offline Chromium gallery passed: navigation, keyboard/Escape, focus, zoom, year-month filters, downloads, zero results and broken images.')
+        variants = [CalendarPage(date(2026, 11, 28), 'A', 'A', f'同日同版式候选 {number}',
+                                 '测试出处', variant=number) for number in range(1, 4)]
+        variant_batch = Path(temporary) / 'variants'
+        write_batch(variants, variant_batch, seed=17, on_progress=lambda *_: None)
+        loaded.clear()
+        view.load(QUrl.fromLocalFile(str(variant_batch / 'index.html')))
+        QTimer.singleShot(30000, loop.quit)
+        loop.exec()
+        if loaded != [True]:
+            raise AssertionError(f'Variant gallery failed to load: {loaded}')
+        check(page, 'document.querySelectorAll(".card").length===3', 'Repeated-layout cards were lost.')
+        js('document.querySelector(".preview").click()')
+        for index, variant in enumerate(variants):
+            for extension in ('png', 'svg'):
+                expected = json.dumps(f'{extension}/{variant.basename}.{extension}')
+                check(page, f'document.getElementById("viewer-{extension}").getAttribute("href")==={expected}',
+                      f'Variant {index + 1} {extension} download points to the wrong page.')
+            caption = json.dumps(f'{variant.quote} · {variant.source}', ensure_ascii=True)
+            check(page, f'document.getElementById("viewer-caption").textContent==={caption}',
+                  'Variant navigation reused another page caption.')
+            if index < len(variants) - 1:
+                js('document.getElementById("viewer-next").click()')
+        check(page, 'document.getElementById("viewer-next").disabled', 'Last variant boundary missing.')
+        js('document.getElementById("viewer").close();document.getElementById("search").value="候选 2";'
+           'document.getElementById("search").dispatchEvent(new Event("input"))')
+        wait_for(page, 'document.querySelectorAll(".card:not([hidden])").length===1',
+                 'Variant search did not isolate the selected quote.')
+        js('document.querySelector(".card:not([hidden]) .preview").click()')
+        expected = json.dumps(f'png/{variants[1].basename}.png')
+        check(page, f'document.getElementById("viewer-png").getAttribute("href")==={expected}',
+              'Filtered variant points to another page.')
+        check(page, 'document.getElementById("viewer-prev").disabled&&document.getElementById("viewer-next").disabled',
+              'Filtered variant navigation escaped the result set.')
+        if interceptor.remote:
+            raise AssertionError('Variant gallery attempted network access.')
+        print('Offline Chromium gallery passed: navigation, keyboard/Escape, focus, zoom, year-month filters, downloads, zero results, broken images and same-date/layout variants.')
     view.close()
     page.deleteLater()
     app.processEvents()

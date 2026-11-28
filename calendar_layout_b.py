@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from svg_primitives import (
-    BRAND, CLAY, INK, LATIN, PALE, PAPER, SANS, label_block, line,
+    CLAY, INK, LATIN, PALE, PAPER, SANS, footer_brand, label_block, line,
     quote_block, rect, svg_open, text,
 )
 
@@ -69,7 +69,8 @@ def render_b(m: dict[str, object]) -> str:
           *([text(117, 954, "“", 92, fill=PAPER, family=LATIN)] if str(m["quote"]).strip() else []),
           rect(918, 796, 176, 268, INK, INK, 0)]
     p.append(quote_block(str(m["quote"]), "", x=547, y=930, width=700,
-                         max_height=190, font_size=42, max_lines=4))
+                         max_height=190, font_size=42, max_lines=4,
+                         top=816, bottom=1044))
     p += [rect(42, 1078, 150, 159, INK, INK, 0),
           f'<path d="M42 1078 L192 1078 L42 1237 Z" fill="{PAPER}"/>',
           *([label_block(str(m["source"]), x=242, y=1141, width=658,
@@ -79,7 +80,9 @@ def render_b(m: dict[str, object]) -> str:
                   spacing=1.0, max_width=650)] if m["source"] else []),
           rect(42, 1242, 1052, 123, "none", INK, 1.3),
           rect(883, 1242, 211, 123, INK, INK, 0),
-          text(462, 1318, BRAND, 16, family=LATIN, italic=True, max_width=760),
+          footer_brand(462, 1296 if m.get("creator") else 1318, str(m.get("creator", "")),
+                       brand_size=16, brand_spacing=0, max_width=760,
+                       creator_y=1326, creator_size=12.5, creator_family=SANS, creator_max_width=760),
           text(988, 1304, "FILED UNDER", 10.5, fill=PAPER, family=SANS,
                spacing=0.6, max_width=180),
           text(988, 1327, f'READING / {m["ordinal"]:03d}', 10.5, fill=PAPER, family=SANS,

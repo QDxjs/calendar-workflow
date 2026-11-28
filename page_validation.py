@@ -30,7 +30,7 @@ def validate_pages(pages: list[CalendarPage], *, renderers: Mapping[str, object]
             raise ValueError(f"第 {index} 页版式无效：{layout!r}；应为 A–I。")
         if layout_selection not in (*renderers, "random"):
             raise ValueError(f"第 {index} 页版式选择无效：{layout_selection!r}。")
-        for label, value in (("语录正文", quote), ("出处", page.source)):
+        for label, value in (("语录正文", quote), ("出处", page.source), ("制作者署名", page.creator)):
             invalid = INVALID_XML_TEXT.search(value)
             if invalid is not None:
                 raise ValueError(f"第 {index} 页{label}含 SVG 不支持的字符 U+{ord(invalid.group()):04X}。")
@@ -50,7 +50,9 @@ def validate_pages(pages: list[CalendarPage], *, renderers: Mapping[str, object]
                     f"第 {index} 页语录与 {previous_date.isoformat()} 重复；不同日期不能使用相同语录。"
                 )
             seen_quotes[quote_key] = target_date
-        basename = f"{target_date.isoformat()}_layout-{layout}"
+        if type(page.variant) is not int or page.variant < 0:
+            raise ValueError(f"第 {index} 页的页序号必须是非负整数。")
+        basename = page.basename
         if basename in seen_filenames:
             raise ValueError(f"第 {index} 页与前面页面的日期和版式相同，文件名会冲突：{basename}")
         seen_filenames.add(basename)

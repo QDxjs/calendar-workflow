@@ -8,6 +8,7 @@ from datetime import date
 import random
 
 from calendar_models import CalendarPage, GenerationPlan
+from layout_selection import resolve_layouts
 from page_validation import INVALID_XML_TEXT
 from quote_library import normalize_quote_key
 
@@ -40,6 +41,7 @@ def validate_manual_source(content: ManualQuoteSource) -> ManualQuoteSource:
 def plan_manual_page(
     target_date: date, content: ManualQuoteSource, layout_selection: str,
     seed: int | None = None, *,
+    creator: str = "",
     renderers: Mapping[str, Callable[[dict[str, object]], str]] | None = None,
 ) -> GenerationPlan:
     """Try SVGs in memory, then choose only among layouts that actually fit."""
@@ -49,25 +51,34 @@ def plan_manual_page(
 
     content = validate_manual_source(content)
     renderers = RENDERERS if renderers is None else renderers
-    if layout_selection != "RANDOM" and layout_selection not in renderers:
-        raise ManualQuoteError("quote", "版式应为 A–I 或 RANDOM。")
-    candidates = sorted(renderers) if layout_selection == "RANDOM" else [layout_selection]
-    selection = "random" if layout_selection == "RANDOM" else layout_selection
+    try:
+        explicit_layouts = resolve_layouts(layout_selection, renderers)
+    except ValueError as exc:
+        raise ManualQuoteError("quote", str(exc)) from exc
+    candidates = explicit_layouts or tuple(sorted(renderers))
     eligible = []
-    last_error = ""
+    errors = []
     for layout in candidates:
-        page = CalendarPage(target_date, selection, layout, content.quote, content.source, "")
+        page = CalendarPage(
+            target_date, layout if explicit_layouts else "random", layout,
+            content.quote, content.source, "", creator.strip(),
+        )
         try:
             validate_rendering([page], renderers=renderers, metadata=metadata,
                                validate_pages=lambda pages: validate_pages(pages, renderers=renderers))
         except ValueError as exc:
-            last_error = str(exc)
+            errors.append((layout, str(exc)))
         else:
             eligible.append(page)
+    if explicit_layouts and errors:
+        failed = "、".join(layout for layout, _error in errors)
+        raise ManualQuoteError(
+            "quote", f"当前正文或出处无法排入版式 {failed}，请精简文字、调整换行、取消这些版式或改用随机版式。\n{errors[0][1]}",
+        )
     if not eligible:
-        message = ("当前正文或出处超出全部版式上限，请适当精简或调整换行。"
-                   if layout_selection == "RANDOM" else
-                   f"当前正文或出处无法排入版式 {layout_selection}，请精简文字、调整换行或改用随机版式。")
-        raise ManualQuoteError("quote", f"{message}\n{last_error}")
+        message = "当前正文或出处超出全部版式上限，请适当精简或调整换行。"
+        raise ManualQuoteError("quote", f"{message}\n{errors[-1][1]}")
+    if explicit_layouts:
+        return GenerationPlan(tuple(eligible), seed)
     page = random.Random(seed).choice(eligible)
     return GenerationPlan((page,), seed)
